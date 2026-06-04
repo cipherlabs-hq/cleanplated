@@ -2,7 +2,7 @@ use std::{collections::HashMap, env, time::Duration};
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use reqwest::Client;
 use serde::{Deserialize, de::DeserializeOwned};
 use tracing::warn;
@@ -12,8 +12,12 @@ use crate::{
     infrastructure::connectors::HealthDataConnector,
 };
 
-const DEFAULT_INVENTORY_URL: &str = "https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inventory_12312025/FeatureServer";
-const DEFAULT_INSPECTIONS_URL: &str = "https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inspections_01012023_to_123120025/FeatureServer";
+const DEFAULT_INVENTORY_URL: &str = "https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inventory_04012026/FeatureServer";
+const DEFAULT_INSPECTIONS_URL: &str = "https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inspections_04012023_to_033120026/FeatureServer";
+const DEFAULT_INVENTORY_CSV_URL: &str =
+    "https://www.arcgis.com/sharing/rest/content/items/4f31c9a99e444a40a3806e3bbe7b5fdd/data";
+const DEFAULT_INSPECTIONS_CSV_URL: &str =
+    "https://www.arcgis.com/sharing/rest/content/items/19b6607ac82c4512b10811870975dbdc/data";
 const DEFAULT_PAGE_SIZE: usize = 2_000;
 
 #[derive(Clone)]
@@ -21,6 +25,8 @@ pub struct LaCountyConnector {
     client: Client,
     inventory_url: String,
     inspections_url: String,
+    inventory_csv_url: String,
+    inspections_csv_url: String,
     page_size: usize,
     max_records: Option<usize>,
 }
@@ -37,6 +43,10 @@ impl LaCountyConnector {
             .unwrap_or_else(|_| DEFAULT_INVENTORY_URL.to_owned());
         let inspections_url = env::var("CLEANPLATED_LA_INSPECTIONS_URL")
             .unwrap_or_else(|_| DEFAULT_INSPECTIONS_URL.to_owned());
+        let inventory_csv_url = env::var("CLEANPLATED_LA_INVENTORY_CSV_URL")
+            .unwrap_or_else(|_| DEFAULT_INVENTORY_CSV_URL.to_owned());
+        let inspections_csv_url = env::var("CLEANPLATED_LA_INSPECTIONS_CSV_URL")
+            .unwrap_or_else(|_| DEFAULT_INSPECTIONS_CSV_URL.to_owned());
         let page_size = env::var("CLEANPLATED_LA_PAGE_SIZE")
             .ok()
             .or_else(|| env::var("CLEANPLATED_LA_LIMIT").ok())
@@ -61,6 +71,8 @@ impl LaCountyConnector {
             client,
             inventory_url,
             inspections_url,
+            inventory_csv_url,
+            inspections_csv_url,
             page_size,
             max_records,
         }
@@ -91,15 +103,23 @@ impl LaCountyConnector {
                 query.push(("orderByFields".to_owned(), order_by.to_owned()));
             }
 
-            let response: ArcGisResponse<T> = self
+            let response = self
                 .client
                 .get(format!("{}/0/query", source_url.trim_end_matches('/')))
                 .query(&query)
                 .send()
                 .await?
                 .error_for_status()?
-                .json()
+                .json::<serde_json::Value>()
                 .await?;
+            if let Some(error) = response.get("error") {
+                anyhow::bail!("ArcGIS query returned error for {source_url}: {error}");
+            }
+
+            let response: ArcGisResponse<T> =
+                serde_json::from_value(response).with_context(|| {
+                    format!("ArcGIS response missing expected features for {source_url}")
+                })?;
 
             let page_count = response.features.len();
             rows.extend(response.features.into_iter().map(|f| f.attributes));
@@ -126,18 +146,25 @@ impl LaCountyConnector {
     }
 
     async fn fetch_inspections(&self) -> Result<Vec<LaInspectionAttrs>> {
-        self.query_features(
+        match self.query_features(
             &self.inspections_url,
             "FACILITY_ID IS NOT NULL",
             "ACTIVITY_DATE,FACILITY_ID,FACILITY_NAME,FACILITY_ADDRESS,FACILITY_CITY,FACILITY_STATE,FACILITY_ZIP,SCORE,GRADE",
             Some("ACTIVITY_DATE DESC"),
         )
         .await
-        .context("LA inspections request failed")
+        .context("LA inspections FeatureServer request failed")
+        {
+            Ok(records) => Ok(records),
+            Err(error) => {
+                warn!(error = %error, "LA inspections FeatureServer failed; falling back to CSV item");
+                self.fetch_inspections_csv().await
+            }
+        }
     }
 
     async fn fetch_inventory(&self) -> Result<HashMap<String, LaInventoryAttrs>> {
-        let rows: Vec<LaInventoryAttrs> = self
+        let rows: Vec<LaInventoryAttrs> = match self
             .query_features(
                 &self.inventory_url,
                 "FACILITY_ID IS NOT NULL",
@@ -145,7 +172,14 @@ impl LaCountyConnector {
                 None,
             )
             .await
-            .context("LA inventory request failed")?;
+            .context("LA inventory FeatureServer request failed")
+        {
+            Ok(records) => records,
+            Err(error) => {
+                warn!(error = %error, "LA inventory FeatureServer failed; falling back to CSV item");
+                self.fetch_inventory_csv().await?
+            }
+        };
 
         let mut inventory_map = HashMap::with_capacity(rows.len());
         for attrs in rows {
@@ -155,6 +189,69 @@ impl LaCountyConnector {
         }
 
         Ok(inventory_map)
+    }
+
+    async fn fetch_inspections_csv(&self) -> Result<Vec<LaInspectionAttrs>> {
+        let body = self
+            .client
+            .get(&self.inspections_csv_url)
+            .send()
+            .await
+            .context("LA inspections CSV request failed")?
+            .error_for_status()
+            .context("LA inspections CSV returned non-success status")?
+            .text()
+            .await
+            .context("LA inspections CSV body read failed")?;
+
+        let mut rows = csv::ReaderBuilder::new()
+            .flexible(true)
+            .trim(csv::Trim::All)
+            .from_reader(body.as_bytes())
+            .deserialize::<LaInspectionCsvRow>()
+            .filter_map(|row| match row {
+                Ok(row) => Some(row.into_attrs()),
+                Err(error) => {
+                    warn!(%error, "Skipping malformed LA inspections CSV row");
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        rows.sort_by(|left, right| right.activity_date.cmp(&left.activity_date));
+        if let Some(max_records) = self.max_records {
+            rows.truncate(max_records);
+        }
+
+        Ok(rows)
+    }
+
+    async fn fetch_inventory_csv(&self) -> Result<Vec<LaInventoryAttrs>> {
+        let body = self
+            .client
+            .get(&self.inventory_csv_url)
+            .send()
+            .await
+            .context("LA inventory CSV request failed")?
+            .error_for_status()
+            .context("LA inventory CSV returned non-success status")?
+            .text()
+            .await
+            .context("LA inventory CSV body read failed")?;
+
+        Ok(csv::ReaderBuilder::new()
+            .flexible(true)
+            .trim(csv::Trim::All)
+            .from_reader(body.as_bytes())
+            .deserialize::<LaInventoryCsvRow>()
+            .filter_map(|row| match row {
+                Ok(row) => Some(row.into_attrs()),
+                Err(error) => {
+                    warn!(%error, "Skipping malformed LA inventory CSV row");
+                    None
+                }
+            })
+            .collect::<Vec<_>>())
     }
 }
 
@@ -285,4 +382,116 @@ struct LaInventoryAttrs {
     facility_latitude: Option<f64>,
     #[serde(rename = "FACILITY_LONGITUDE")]
     facility_longitude: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LaInspectionCsvRow {
+    #[serde(rename = "ACTIVITY DATE")]
+    activity_date: Option<String>,
+    #[serde(rename = "FACILITY ID")]
+    facility_id: Option<String>,
+    #[serde(rename = "FACILITY NAME")]
+    facility_name: Option<String>,
+    #[serde(rename = "FACILITY ADDRESS")]
+    facility_address: Option<String>,
+    #[serde(rename = "FACILITY CITY")]
+    facility_city: Option<String>,
+    #[serde(rename = "FACILITY STATE")]
+    facility_state: Option<String>,
+    #[serde(rename = "FACILITY ZIP")]
+    facility_zip: Option<String>,
+    #[serde(rename = "SCORE")]
+    score: Option<f64>,
+    #[serde(rename = "GRADE")]
+    grade: Option<String>,
+}
+
+impl LaInspectionCsvRow {
+    fn into_attrs(self) -> LaInspectionAttrs {
+        LaInspectionAttrs {
+            activity_date: self
+                .activity_date
+                .as_deref()
+                .and_then(parse_lacounty_csv_date_millis),
+            facility_id: self.facility_id,
+            facility_name: self.facility_name,
+            facility_address: self.facility_address,
+            facility_city: self.facility_city,
+            facility_state: self.facility_state,
+            facility_zip: self.facility_zip,
+            score: self.score,
+            grade: self.grade,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct LaInventoryCsvRow {
+    #[serde(rename = "FACILITY ID")]
+    facility_id: Option<String>,
+    #[serde(rename = "FACILITY NAME")]
+    facility_name: Option<String>,
+    #[serde(rename = "FACILITY ADDRESS")]
+    facility_address: Option<String>,
+    #[serde(rename = "FACILITY CITY")]
+    facility_city: Option<String>,
+    #[serde(rename = "FACILITY  STATE")]
+    facility_state: Option<String>,
+    #[serde(rename = "FACILITY ZIP")]
+    facility_zip: Option<String>,
+    #[serde(rename = "FACILITY LATITUDE")]
+    facility_latitude: Option<f64>,
+    #[serde(rename = "FACILITY LONGITUDE")]
+    facility_longitude: Option<f64>,
+}
+
+impl LaInventoryCsvRow {
+    fn into_attrs(self) -> LaInventoryAttrs {
+        LaInventoryAttrs {
+            facility_id: self.facility_id,
+            facility_name: self.facility_name,
+            facility_address: self.facility_address,
+            facility_city: self.facility_city,
+            facility_state: self.facility_state,
+            facility_zip: self.facility_zip,
+            facility_latitude: self.facility_latitude,
+            facility_longitude: self.facility_longitude,
+        }
+    }
+}
+
+fn parse_lacounty_csv_date_millis(value: &str) -> Option<i64> {
+    let date = NaiveDate::parse_from_str(value.trim(), "%m/%d/%Y").ok()?;
+    let naive = date.and_hms_opt(0, 0, 0)?;
+    Some(Utc.from_utc_datetime(&naive).timestamp_millis())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_lacounty_csv_date_uses_utc_midnight_millis() {
+        assert_eq!(
+            parse_lacounty_csv_date_millis("04/01/2026"),
+            Some(1_775_001_600_000)
+        );
+    }
+
+    #[test]
+    fn csv_inspection_row_maps_headers_with_spaces() {
+        let csv = "ACTIVITY DATE,FACILITY ID,FACILITY NAME,FACILITY ADDRESS,FACILITY CITY,FACILITY STATE,FACILITY ZIP,SCORE,GRADE\n 04/01/2026,FA1,Name,Addr,City,CA,90001,97,A\n";
+        let row = csv::ReaderBuilder::new()
+            .trim(csv::Trim::All)
+            .from_reader(csv.as_bytes())
+            .deserialize::<LaInspectionCsvRow>()
+            .next()
+            .unwrap()
+            .unwrap()
+            .into_attrs();
+
+        assert_eq!(row.facility_id.as_deref(), Some("FA1"));
+        assert_eq!(row.activity_date, Some(1_775_001_600_000));
+        assert_eq!(row.score, Some(97.0));
+    }
 }

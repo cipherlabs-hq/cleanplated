@@ -5,6 +5,7 @@ import {
   ThumbsUp16,
   Search16,
   LocationCurrent16,
+  Map16,
   Restaurant16,
   Filter16,
   ChevronLeft16,
@@ -81,6 +82,7 @@ type SortMode = 'trust_desc' | 'recent_desc' | 'name_asc'
 type ScoreSlice = 'all' | 'elite' | 'solid' | 'watch'
 type VoteType = 'like' | 'dislike'
 type LocationState = 'default' | 'requesting' | 'granted' | 'denied' | 'unsupported'
+type PrimaryView = 'map' | 'results' | 'favorites'
 type GeoOptions = PositionOptions
 
 const GEO_ERROR_PERMISSION_DENIED = 1
@@ -133,6 +135,7 @@ let autocompleteController: AbortController | null = null
 let searchController: AbortController | null = null
 
 const googleMapsApiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string) || ''
+const primaryView = ref<PrimaryView>(googleMapsApiKey ? 'map' : 'results')
 const mapReady = ref(false)
 const mapContainerRef = ref<HTMLElement | null>(null)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -300,6 +303,21 @@ const lastRefreshLabel = computed(() => {
 })
 
 const connectorRows = computed(() => ingestionStats.value?.connector_stats ?? [])
+
+const selectPrimaryView = async (view: PrimaryView) => {
+  primaryView.value = view
+  trackEvent('cp_primary_view_changed', { view })
+  if (view === 'map') {
+    await nextTick()
+    initializeMap()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const g = (window as any).google
+    if (mapInstance && g?.maps) {
+      g.maps.event.trigger(mapInstance, 'resize')
+      mapInstance.setCenter({ lat: activeCenter.value.latitude, lng: activeCenter.value.longitude })
+    }
+  }
+}
 
 const formatSourceName = (source: string) => {
   const labels: Record<string, string> = {
@@ -1080,8 +1098,15 @@ const buildFacilityInfoWindowHtml = (facility: FacilitySummary) => {
   )
 }
 
-const focusOnFacility = (facility: FacilitySummary) => {
-  if (!mapInstance || !facility.latitude || !facility.longitude) return
+const focusOnFacility = async (facility: FacilitySummary) => {
+  if (!googleMapsApiKey || !facility.latitude || !facility.longitude) return
+  if (primaryView.value !== 'map') {
+    await selectPrimaryView('map')
+  }
+  if (!mapInstance) {
+    initializeMap()
+  }
+  if (!mapInstance) return
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const g = (window as any).google
   if (!g?.maps) return
@@ -1365,24 +1390,47 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <cv-checkbox v-model="recentOnly" label="Inspected in the last 90 days" />
+        <cv-checkbox v-model="recentOnly" value="recent" label="Inspected in the last 90 days" />
       </div>
     </section>
 
-    <!-- ─── Results header ─── -->
-    <section id="results-section" class="cp-results-header">
-      <div class="cp-results-header__summary">
-        <h2 class="cp-results-header__count" v-if="!loading">{{ resultsSummary }}</h2>
-        <div v-else class="cp-skeleton cp-skeleton--text" style="width:140px;height:24px"></div>
-        <p class="cp-results-header__range" v-if="totalMatches > 0 && !loading">
-          Showing {{ pageStart }}–{{ pageEnd }}
-        </p>
-      </div>
-      <!-- view toggle removed: map + results always visible -->
-    </section>
+    <nav class="cp-primary-tabs" aria-label="Primary content view" role="tablist">
+      <button
+        v-if="googleMapsApiKey"
+        class="cp-primary-tab"
+        :class="{ 'cp-primary-tab--active': primaryView === 'map' }"
+        :aria-selected="primaryView === 'map'"
+        role="tab"
+        @click="selectPrimaryView('map')"
+      >
+        <Map16 />
+        <span>Map</span>
+      </button>
+      <button
+        class="cp-primary-tab"
+        :class="{ 'cp-primary-tab--active': primaryView === 'results' }"
+        :aria-selected="primaryView === 'results'"
+        role="tab"
+        @click="selectPrimaryView('results')"
+      >
+        <Restaurant16 />
+        <span>Results</span>
+      </button>
+      <button
+        class="cp-primary-tab"
+        :class="{ 'cp-primary-tab--active': primaryView === 'favorites' }"
+        :aria-selected="primaryView === 'favorites'"
+        role="tab"
+        @click="selectPrimaryView('favorites')"
+      >
+        <StarFilled16 />
+        <span>Favorites</span>
+        <span v-if="topTenRanked.length > 0" class="cp-primary-tab__count">{{ topTenRanked.length }}</span>
+      </button>
+    </nav>
 
     <!-- ─── Map view ─── -->
-    <section v-if="googleMapsApiKey" class="cp-map-section">
+    <section v-if="googleMapsApiKey" v-show="primaryView === 'map'" class="cp-map-section" role="tabpanel">
       <div ref="mapContainerRef" class="cp-map"></div>
       <cv-button
         v-if="showSearchAreaBtn"
@@ -1395,121 +1443,134 @@ onUnmounted(() => {
       </cv-button>
     </section>
 
-    <!-- ─── Results list ─── -->
-    <section class="cp-results">
-      <!-- Loading skeletons -->
-      <template v-if="loading">
-        <div v-for="n in 4" :key="n" class="cp-card cp-card--skeleton">
-          <div class="cp-card__body">
-            <div class="cp-skeleton cp-skeleton--text" style="width:70%;height:16px"></div>
-            <div class="cp-skeleton cp-skeleton--text" style="width:90%;height:12px;margin-top:8px"></div>
-            <div class="cp-skeleton cp-skeleton--text" style="width:40%;height:12px;margin-top:8px"></div>
-          </div>
-          <div class="cp-skeleton cp-skeleton--circle"></div>
+    <div v-show="primaryView === 'results'" role="tabpanel">
+      <!-- ─── Results header ─── -->
+      <section id="results-section" class="cp-results-header">
+        <div class="cp-results-header__summary">
+          <h2 class="cp-results-header__count" v-if="!loading">{{ resultsSummary }}</h2>
+          <div v-else class="cp-skeleton cp-skeleton--text" style="width:140px;height:24px"></div>
+          <p class="cp-results-header__range" v-if="totalMatches > 0 && !loading">
+            Showing {{ pageStart }}–{{ pageEnd }}
+          </p>
         </div>
-      </template>
+      </section>
 
-      <!-- Error state -->
-      <div v-else-if="error" class="cp-empty">
-        <WarningAltFilled16 class="cp-empty__icon cp-empty__icon--error" />
-        <p class="cp-empty__title">Something went wrong</p>
-        <p class="cp-empty__subtitle">{{ error }}</p>
-        <cv-button kind="secondary" :icon="Renew16" @click="fetchFacilities(true)">
-          Try again
-        </cv-button>
-      </div>
+      <!-- ─── Results list ─── -->
+      <section class="cp-results">
+        <!-- Loading skeletons -->
+        <template v-if="loading">
+          <div v-for="n in 4" :key="n" class="cp-card cp-card--skeleton">
+            <div class="cp-card__body">
+              <div class="cp-skeleton cp-skeleton--text" style="width:70%;height:16px"></div>
+              <div class="cp-skeleton cp-skeleton--text" style="width:90%;height:12px;margin-top:8px"></div>
+              <div class="cp-skeleton cp-skeleton--text" style="width:40%;height:12px;margin-top:8px"></div>
+            </div>
+            <div class="cp-skeleton cp-skeleton--circle"></div>
+          </div>
+        </template>
 
-      <!-- Empty state -->
-      <div v-else-if="totalMatches === 0 && !loading" class="cp-empty">
-        <Restaurant16 class="cp-empty__icon" />
-        <p class="cp-empty__title">No restaurants match your search</p>
-        <p class="cp-empty__subtitle">
-          Try expanding your search radius, removing filters, or searching by name or ZIP code.
-        </p>
-      </div>
+        <!-- Error state -->
+        <div v-else-if="error" class="cp-empty">
+          <WarningAltFilled16 class="cp-empty__icon cp-empty__icon--error" />
+          <p class="cp-empty__title">Something went wrong</p>
+          <p class="cp-empty__subtitle">{{ error }}</p>
+          <cv-button kind="secondary" :icon="Renew16" @click="fetchFacilities(true)">
+            Try again
+          </cv-button>
+        </div>
 
-      <!-- Restaurant cards -->
-      <template v-else>
-        <div
-          v-for="facility in facilities"
-          :key="facility.id"
-          class="cp-card"
-          :class="scoreTierClass(facility.trust_score)"
-          @click="focusOnFacility(facility)"
-        >
-          <div class="cp-card__body">
-            <h3 class="cp-card__name">{{ facility.name }}</h3>
-            <p class="cp-card__address">{{ facility.address }}, {{ facility.city }} {{ facility.postal_code }}</p>
-            <div class="cp-card__meta">
-              <span class="cp-card__meta-item">{{ facility.jurisdiction }}</span>
-              <span v-if="distanceLabel(facility)" class="cp-card__meta-item">{{ distanceLabel(facility) }}</span>
-              <span class="cp-card__meta-item">Inspected {{ formatDate(facility.latest_inspection_at) }}</span>
+        <!-- Empty state -->
+        <div v-else-if="totalMatches === 0 && !loading" class="cp-empty">
+          <Restaurant16 class="cp-empty__icon" />
+          <p class="cp-empty__title">No restaurants match your search</p>
+          <p class="cp-empty__subtitle">
+            Try expanding your search radius, removing filters, or searching by name or ZIP code.
+          </p>
+        </div>
+
+        <!-- Restaurant cards -->
+        <template v-else>
+          <div
+            v-for="facility in facilities"
+            :key="facility.id"
+            class="cp-card"
+            :class="scoreTierClass(facility.trust_score)"
+            @click="focusOnFacility(facility)"
+          >
+            <div class="cp-card__body">
+              <h3 class="cp-card__name">{{ facility.name }}</h3>
+              <p class="cp-card__address">{{ facility.address }}, {{ facility.city }} {{ facility.postal_code }}</p>
+              <div class="cp-card__meta">
+                <span class="cp-card__meta-item">{{ facility.jurisdiction }}</span>
+                <span v-if="distanceLabel(facility)" class="cp-card__meta-item">{{ distanceLabel(facility) }}</span>
+                <span class="cp-card__meta-item">Inspected {{ formatDate(facility.latest_inspection_at) }}</span>
+              </div>
+            </div>
+            <div class="cp-card__score" :class="scoreColor(facility.trust_score)">
+              <span class="cp-card__score-value">{{ facility.trust_score }}</span>
+              <span class="cp-card__score-label">{{ scoreLabel(facility.trust_score) }}</span>
+            </div>
+            <div class="cp-card__votes">
+              <button
+                class="cp-vote-btn"
+                :aria-label="`Recommend ${facility.name}`"
+                :disabled="isVoting(facility.id)"
+                @click.stop="submitVote(facility.id, 'like')"
+              >
+                <ThumbsUp16 /> {{ facility.likes ?? 0 }}
+              </button>
+              <button
+                class="cp-vote-btn"
+                :aria-label="`Not recommended ${facility.name}`"
+                :disabled="isVoting(facility.id)"
+                @click.stop="submitVote(facility.id, 'dislike')"
+              >
+                <ThumbsDown16 /> {{ facility.dislikes ?? 0 }}
+              </button>
             </div>
           </div>
-          <div class="cp-card__score" :class="scoreColor(facility.trust_score)">
-            <span class="cp-card__score-value">{{ facility.trust_score }}</span>
-            <span class="cp-card__score-label">{{ scoreLabel(facility.trust_score) }}</span>
-          </div>
-          <div class="cp-card__votes">
-            <button
-              class="cp-vote-btn"
-              :aria-label="`Recommend ${facility.name}`"
-              :disabled="isVoting(facility.id)"
-              @click.stop="submitVote(facility.id, 'like')"
-            >
-              <ThumbsUp16 /> {{ facility.likes ?? 0 }}
-            </button>
-            <button
-              class="cp-vote-btn"
-              :aria-label="`Not recommended ${facility.name}`"
-              :disabled="isVoting(facility.id)"
-              @click.stop="submitVote(facility.id, 'dislike')"
-            >
-              <ThumbsDown16 /> {{ facility.dislikes ?? 0 }}
-            </button>
-          </div>
-        </div>
-      </template>
-    </section>
-
-    <!-- ─── Pagination ─── -->
-    <section v-if="totalMatches > 0 && !loading" class="cp-pagination">
-      <p class="cp-pagination__info">
-        Page {{ currentPage }} of {{ totalPages }} · {{ pageSize }} per page
-      </p>
-      <div class="cp-pagination__controls">
-        <button
-          class="cp-page-btn"
-          :disabled="currentPage <= 1"
-          @click="goToPage(currentPage - 1)"
-          aria-label="Previous page"
-        >
-          <ChevronLeft16 />
-        </button>
-        <template v-for="(p, idx) in paginationPages" :key="idx">
-          <span v-if="p === '...'" class="cp-pagination__ellipsis">…</span>
-          <button
-            v-else
-            class="cp-page-btn"
-            :class="{ 'cp-page-btn--active': p === currentPage }"
-            @click="goToPage(p)"
-          >
-            {{ p }}
-          </button>
         </template>
-        <button
-          class="cp-page-btn"
-          :disabled="currentPage >= totalPages"
-          @click="goToPage(currentPage + 1)"
-          aria-label="Next page"
-        >
-          <ChevronRight16 />
-        </button>
-      </div>
-    </section>
+      </section>
+
+      <!-- ─── Pagination ─── -->
+      <section v-if="totalMatches > 0 && !loading" class="cp-pagination">
+        <p class="cp-pagination__info">
+          Page {{ currentPage }} of {{ totalPages }} · {{ pageSize }} per page
+        </p>
+        <div class="cp-pagination__controls">
+          <button
+            class="cp-page-btn"
+            :disabled="currentPage <= 1"
+            @click="goToPage(currentPage - 1)"
+            aria-label="Previous page"
+          >
+            <ChevronLeft16 />
+          </button>
+          <template v-for="(p, idx) in paginationPages" :key="idx">
+            <span v-if="p === '...'" class="cp-pagination__ellipsis">…</span>
+            <button
+              v-else
+              class="cp-page-btn"
+              :class="{ 'cp-page-btn--active': p === currentPage }"
+              @click="goToPage(p)"
+            >
+              {{ p }}
+            </button>
+          </template>
+          <button
+            class="cp-page-btn"
+            :disabled="currentPage >= totalPages"
+            @click="goToPage(currentPage + 1)"
+            aria-label="Next page"
+          >
+            <ChevronRight16 />
+          </button>
+        </div>
+      </section>
+    </div>
 
     <!-- ─── Community favorites ─── -->
-    <section class="cp-panel cp-favorites">
+    <section v-show="primaryView === 'favorites'" class="cp-panel cp-favorites" role="tabpanel">
       <header class="cp-section-head">
         <h2 class="cp-section-title">
           <StarFilled16 class="cp-section-icon" /> Community Favorites

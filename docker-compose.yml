@@ -42,9 +42,9 @@ services:
       CLEANPLATED_SD_SOCRATA_ACTIVE_ONLY: ${CLEANPLATED_SD_SOCRATA_ACTIVE_ONLY:-true}
       CLEANPLATED_SD_SOCRATA_TIMEOUT_SECS: ${CLEANPLATED_SD_SOCRATA_TIMEOUT_SECS:-20}
       CLEANPLATED_SD_SOCRATA_APP_TOKEN: ${CLEANPLATED_SD_SOCRATA_APP_TOKEN:-}
-      CLEANPLATED_LA_INVENTORY_URL: ${CLEANPLATED_LA_INVENTORY_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inventory_12312025/FeatureServer}
-      CLEANPLATED_LA_INSPECTIONS_URL: ${CLEANPLATED_LA_INSPECTIONS_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inspections_01012023_to_123120025/FeatureServer}
-      CLEANPLATED_LA_VIOLATIONS_URL: ${CLEANPLATED_LA_VIOLATIONS_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Violations_01012023_to_123120025/FeatureServer}
+      CLEANPLATED_LA_INVENTORY_URL: ${CLEANPLATED_LA_INVENTORY_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inventory_04012026/FeatureServer}
+      CLEANPLATED_LA_INSPECTIONS_URL: ${CLEANPLATED_LA_INSPECTIONS_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inspections_04012023_to_033120026/FeatureServer}
+      CLEANPLATED_LA_VIOLATIONS_URL: ${CLEANPLATED_LA_VIOLATIONS_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Violations_04012023_to_03312026/FeatureServer}
       CLEANPLATED_LA_PAGE_SIZE: ${CLEANPLATED_LA_PAGE_SIZE:-2000}
       CLEANPLATED_LA_MAX_RECORDS: ${CLEANPLATED_LA_MAX_RECORDS:-}
       CLEANPLATED_LA_TIMEOUT_SECS: ${CLEANPLATED_LA_TIMEOUT_SECS:-20}
@@ -91,9 +91,9 @@ services:
       CLEANPLATED_SD_SOCRATA_ACTIVE_ONLY: ${CLEANPLATED_SD_SOCRATA_ACTIVE_ONLY:-true}
       CLEANPLATED_SD_SOCRATA_TIMEOUT_SECS: ${CLEANPLATED_SD_SOCRATA_TIMEOUT_SECS:-20}
       CLEANPLATED_SD_SOCRATA_APP_TOKEN: ${CLEANPLATED_SD_SOCRATA_APP_TOKEN:-}
-      CLEANPLATED_LA_INVENTORY_URL: ${CLEANPLATED_LA_INVENTORY_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inventory_12312025/FeatureServer}
-      CLEANPLATED_LA_INSPECTIONS_URL: ${CLEANPLATED_LA_INSPECTIONS_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inspections_01012023_to_123120025/FeatureServer}
-      CLEANPLATED_LA_VIOLATIONS_URL: ${CLEANPLATED_LA_VIOLATIONS_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Violations_01012023_to_123120025/FeatureServer}
+      CLEANPLATED_LA_INVENTORY_URL: ${CLEANPLATED_LA_INVENTORY_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inventory_04012026/FeatureServer}
+      CLEANPLATED_LA_INSPECTIONS_URL: ${CLEANPLATED_LA_INSPECTIONS_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inspections_04012023_to_033120026/FeatureServer}
+      CLEANPLATED_LA_VIOLATIONS_URL: ${CLEANPLATED_LA_VIOLATIONS_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Violations_04012023_to_03312026/FeatureServer}
       CLEANPLATED_LA_PAGE_SIZE: ${CLEANPLATED_LA_PAGE_SIZE:-2000}
       CLEANPLATED_LA_MAX_RECORDS: ${CLEANPLATED_LA_MAX_RECORDS:-}
       CLEANPLATED_LA_TIMEOUT_SECS: ${CLEANPLATED_LA_TIMEOUT_SECS:-20}
@@ -137,9 +137,9 @@ services:
       CLEANPLATED_SD_SOCRATA_ACTIVE_ONLY: ${CLEANPLATED_SD_SOCRATA_ACTIVE_ONLY:-true}
       CLEANPLATED_SD_SOCRATA_TIMEOUT_SECS: ${CLEANPLATED_SD_SOCRATA_TIMEOUT_SECS:-20}
       CLEANPLATED_SD_SOCRATA_APP_TOKEN: ${CLEANPLATED_SD_SOCRATA_APP_TOKEN:-}
-      CLEANPLATED_LA_INVENTORY_URL: ${CLEANPLATED_LA_INVENTORY_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inventory_12312025/FeatureServer}
-      CLEANPLATED_LA_INSPECTIONS_URL: ${CLEANPLATED_LA_INSPECTIONS_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inspections_01012023_to_123120025/FeatureServer}
-      CLEANPLATED_LA_VIOLATIONS_URL: ${CLEANPLATED_LA_VIOLATIONS_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Violations_01012023_to_123120025/FeatureServer}
+      CLEANPLATED_LA_INVENTORY_URL: ${CLEANPLATED_LA_INVENTORY_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inventory_04012026/FeatureServer}
+      CLEANPLATED_LA_INSPECTIONS_URL: ${CLEANPLATED_LA_INSPECTIONS_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inspections_04012023_to_033120026/FeatureServer}
+      CLEANPLATED_LA_VIOLATIONS_URL: ${CLEANPLATED_LA_VIOLATIONS_URL:-https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Violations_04012023_to_03312026/FeatureServer}
       CLEANPLATED_LA_PAGE_SIZE: ${CLEANPLATED_LA_PAGE_SIZE:-1000}
       CLEANPLATED_LA_MAX_RECORDS: ${CLEANPLATED_LA_MAX_RECORDS:-5000}
       CLEANPLATED_LA_TIMEOUT_SECS: ${CLEANPLATED_LA_TIMEOUT_SECS:-20}
