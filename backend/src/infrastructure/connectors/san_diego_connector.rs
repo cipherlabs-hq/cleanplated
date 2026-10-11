@@ -99,7 +99,8 @@ struct SanDiegoPermitRow {
     longitude: Option<String>,
     last_updated: Option<String>,
     permit_status: Option<String>,
-    active_permit: Option<bool>,
+    // The county changed this column from a boolean to text ("A") in 2026, so accept either.
+    active_permit: Option<serde_json::Value>,
 }
 
 #[async_trait]
@@ -113,11 +114,9 @@ impl HealthDataConnector for SanDiegoConnector {
         // docs/research/socal-food-safety-data-strategy.md
         // The strategic framework documents San Diego as Socrata/SODA-first.
         let endpoint = format!("{}/resource/{}.json", self.base_url, self.dataset_id);
-        let where_clause = if self.active_only {
-            "record_id IS NOT NULL AND record_name IS NOT NULL AND active_permit = true"
-        } else {
-            "record_id IS NOT NULL AND record_name IS NOT NULL"
-        };
+        // Filter on active_permit in Rust rather than SoQL: comparing it in the query breaks
+        // whenever the county changes the column's type, which fails the whole source.
+        let where_clause = "record_id IS NOT NULL AND record_name IS NOT NULL";
 
         let mut offset = 0usize;
         let mut rows = Vec::<SanDiegoPermitRow>::new();
@@ -164,8 +163,12 @@ impl HealthDataConnector for SanDiegoConnector {
             offset = offset.saturating_add(page_count);
         }
 
+        let active_only = self.active_only;
         let facilities = rows
             .into_iter()
+            .filter(|row| {
+                !active_only || is_active_permit(row.active_permit.as_ref()).unwrap_or(true)
+            })
             .filter_map(map_row_to_source_input)
             .collect::<Vec<_>>();
 
@@ -197,7 +200,7 @@ fn map_row_to_source_input(row: SanDiegoPermitRow) -> Option<SourceFacilityInput
 
     let (raw_score, letter_grade, placard_status) = derive_scoring_signals(
         row.permit_status.as_deref(),
-        row.active_permit.unwrap_or(true),
+        is_active_permit(row.active_permit.as_ref()).unwrap_or(true),
     );
 
     Some(SourceFacilityInput {
@@ -222,6 +225,20 @@ fn map_row_to_source_input(row: SanDiegoPermitRow) -> Option<SourceFacilityInput
             critical: false,
         }],
     })
+}
+
+/// Reads `active_permit` as either a JSON boolean or a text flag. `None` means the value was
+/// missing or unrecognised.
+fn is_active_permit(value: Option<&serde_json::Value>) -> Option<bool> {
+    match value? {
+        serde_json::Value::Bool(active) => Some(*active),
+        serde_json::Value::String(flag) => match flag.trim().to_ascii_lowercase().as_str() {
+            "a" | "active" | "true" | "t" | "y" | "yes" | "1" => Some(true),
+            "i" | "inactive" | "false" | "f" | "n" | "no" | "0" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn parse_socrata_datetime(value: &str) -> Option<DateTime<Utc>> {
@@ -283,5 +300,62 @@ fn city_fallback_coordinates(city: &str) -> (f64, f64) {
         "IMPERIAL BEACH" => (32.5839, -117.1131),
         "LEMON GROVE" => (32.7426, -117.0317),
         _ => (32.7157, -117.1611),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn active_permit_accepts_the_current_text_flag_and_the_old_boolean() {
+        assert_eq!(is_active_permit(Some(&json!("A"))), Some(true));
+        assert_eq!(is_active_permit(Some(&json!("I"))), Some(false));
+        assert_eq!(is_active_permit(Some(&json!(true))), Some(true));
+        assert_eq!(is_active_permit(Some(&json!(false))), Some(false));
+        assert_eq!(is_active_permit(Some(&json!("?"))), None);
+        assert_eq!(is_active_permit(None), None);
+    }
+
+    #[test]
+    fn a_current_row_maps_with_city_fallback_coordinates() {
+        let row: SanDiegoPermitRow = serde_json::from_value(json!({
+            "record_id": "DEH2026-FFPP-022426",
+            "record_name": "IHOP",
+            "permit_status": "Issued",
+            "active_permit": "A",
+            "address": "9708 MISSION GORGE RD",
+            "city": "SANTEE",
+            "state": "CA",
+            "zip": "92071",
+            "last_updated": "2026-08-10T00:00:00.000"
+        }))
+        .unwrap();
+
+        let facility = map_row_to_source_input(row).unwrap();
+
+        assert_eq!(facility.source_id, "DEH2026-FFPP-022426");
+        assert_eq!(
+            (facility.latitude, facility.longitude),
+            (32.8384, -116.9739)
+        );
+        assert_eq!(facility.letter_grade.as_deref(), Some("A"));
+    }
+
+    /// Hits the live county API. Run with `cargo test -- --ignored san_diego_live`.
+    #[tokio::test]
+    #[ignore]
+    async fn san_diego_live_fetch_returns_facilities() {
+        let facilities = SanDiegoConnector::from_env()
+            .fetch_facilities()
+            .await
+            .unwrap();
+        assert!(
+            facilities.len() > 1000,
+            "only {} facilities",
+            facilities.len()
+        );
     }
 }
