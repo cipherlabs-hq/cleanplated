@@ -7,7 +7,7 @@ CleanPlated is a restaurant health inspection data platform for Southern Califor
 - **Backend**: Rust/Axum API + PostgreSQL + Redis
 - **Frontend**: Vue 3 + Carbon Design System (v10) + Vite
 - **Deployment**: GCP Cloud Run via Cloud Build
-- **Repo**: `derankin/cleanplated`
+- **Repo**: `cipherlabs-hq/cleanplated`
 
 ## Frontend Development — Carbon Design System
 
