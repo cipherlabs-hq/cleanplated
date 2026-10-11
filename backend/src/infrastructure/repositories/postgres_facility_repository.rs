@@ -460,7 +460,9 @@ impl FacilityRepository for PostgresFacilityRepository {
         // ─── scored CTE: text search or geo browse ───
         if has_search_term {
             let term = query.q.as_ref().unwrap().trim();
-            builder.push("WITH scored AS (SELECT f.*, ts_rank(f.search_vector, plainto_tsquery('english', ");
+            builder.push(
+                "WITH scored AS (SELECT f.*, ts_rank(f.search_vector, plainto_tsquery('english', ",
+            );
             builder.push_bind(term);
             builder.push(")) AS fts_rank, similarity(f.name, ");
             builder.push_bind(term);
@@ -474,7 +476,8 @@ impl FacilityRepository for PostgresFacilityRepository {
                 builder.push(")) AS dist_meters");
             }
 
-            builder.push(" FROM facilities f WHERE (f.search_vector @@ plainto_tsquery('english', ");
+            builder
+                .push(" FROM facilities f WHERE (f.search_vector @@ plainto_tsquery('english', ");
             builder.push_bind(term);
             builder.push(") OR similarity(f.name, ");
             builder.push_bind(term);
@@ -498,7 +501,8 @@ impl FacilityRepository for PostgresFacilityRepository {
                 (query.latitude, query.longitude, query.radius_miles)
             {
                 let radius_meters = radius.max(0.1) * 1609.344;
-                builder.push(" AND earth_distance(ll_to_earth(f.latitude, f.longitude), ll_to_earth(");
+                builder
+                    .push(" AND earth_distance(ll_to_earth(f.latitude, f.longitude), ll_to_earth(");
                 builder.push_bind(lat);
                 builder.push(", ");
                 builder.push_bind(lon);
@@ -512,14 +516,16 @@ impl FacilityRepository for PostgresFacilityRepository {
             .jurisdiction
             .as_ref()
             .map(|v| v.trim().to_ascii_lowercase())
-            && !jurisdiction.is_empty() && jurisdiction != "all" {
-                let code = Jurisdiction::from_code(&jurisdiction)
-                    .or_else(|| Jurisdiction::from_label(&jurisdiction))
-                    .map(|j| j.code().to_owned())
-                    .unwrap_or(jurisdiction);
-                builder.push(" AND LOWER(f.jurisdiction) = ");
-                builder.push_bind(code);
-            }
+            && !jurisdiction.is_empty()
+            && jurisdiction != "all"
+        {
+            let code = Jurisdiction::from_code(&jurisdiction)
+                .or_else(|| Jurisdiction::from_label(&jurisdiction))
+                .map(|j| j.code().to_owned())
+                .unwrap_or(jurisdiction);
+            builder.push(" AND LOWER(f.jurisdiction) = ");
+            builder.push_bind(code);
+        }
 
         // Recent-only filter: use latest inspection date, not updated_at.
         // Facilities with no inspections are excluded (MAX returns NULL → filtered out).
@@ -549,9 +555,17 @@ impl FacilityRepository for PostgresFacilityRepository {
             .map(|v| v.trim().to_ascii_lowercase())
         {
             match slice.as_str() {
-                "elite" => { builder.push(format!(" AND trust_score >= {ELITE_THRESHOLD}")); }
-                "solid" => { builder.push(format!(" AND trust_score >= {SOLID_THRESHOLD} AND trust_score < {ELITE_THRESHOLD}")); }
-                "watch" => { builder.push(format!(" AND trust_score < {SOLID_THRESHOLD}")); }
+                "elite" => {
+                    builder.push(format!(" AND trust_score >= {ELITE_THRESHOLD}"));
+                }
+                "solid" => {
+                    builder.push(format!(
+                        " AND trust_score >= {SOLID_THRESHOLD} AND trust_score < {ELITE_THRESHOLD}"
+                    ));
+                }
+                "watch" => {
+                    builder.push(format!(" AND trust_score < {SOLID_THRESHOLD}"));
+                }
                 _ => {}
             }
         }
@@ -563,10 +577,7 @@ impl FacilityRepository for PostgresFacilityRepository {
         // ─── page CTE: ordering + pagination ───
         builder.push(", page AS (SELECT * FROM sliced");
 
-        let sort = query
-            .sort
-            .as_ref()
-            .map(|v| v.trim().to_ascii_lowercase());
+        let sort = query.sort.as_ref().map(|v| v.trim().to_ascii_lowercase());
         match sort.as_deref() {
             Some("recent_desc") => {
                 builder.push(
@@ -785,14 +796,16 @@ impl FacilityRepository for PostgresFacilityRepository {
             .jurisdiction
             .as_ref()
             .map(|v| v.trim().to_ascii_lowercase())
-            && !jurisdiction.is_empty() && jurisdiction != "all" {
-                let code = Jurisdiction::from_code(&jurisdiction)
-                    .or_else(|| Jurisdiction::from_label(&jurisdiction))
-                    .map(|j| j.code().to_owned())
-                    .unwrap_or(jurisdiction);
-                builder.push(" AND LOWER(jurisdiction) = ");
-                builder.push_bind(code);
-            }
+            && !jurisdiction.is_empty()
+            && jurisdiction != "all"
+        {
+            let code = Jurisdiction::from_code(&jurisdiction)
+                .or_else(|| Jurisdiction::from_label(&jurisdiction))
+                .map(|j| j.code().to_owned())
+                .unwrap_or(jurisdiction);
+            builder.push(" AND LOWER(jurisdiction) = ");
+            builder.push_bind(code);
+        }
 
         // Text search filter
         if has_search_term {

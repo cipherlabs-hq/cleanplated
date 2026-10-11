@@ -135,10 +135,11 @@ impl LaCountyConnector {
             rows.extend(response.features.into_iter().map(|f| f.attributes));
 
             if let Some(max_records) = self.max_records
-                && rows.len() >= max_records {
-                    rows.truncate(max_records);
-                    break;
-                }
+                && rows.len() >= max_records
+            {
+                rows.truncate(max_records);
+                break;
+            }
 
             if page_count == 0 {
                 break;
@@ -161,9 +162,8 @@ impl LaCountyConnector {
             return Ok(url.to_owned());
         }
 
-        let query = format!(
-            "title:\"{title}\" orgid:{LA_COUNTY_ARCGIS_ORG_ID} type:\"Feature Service\""
-        );
+        let query =
+            format!("title:\"{title}\" orgid:{LA_COUNTY_ARCGIS_ORG_ID} type:\"Feature Service\"");
         let response = self
             .client
             .get(ARCGIS_SEARCH_URL)
@@ -208,7 +208,10 @@ impl LaCountyConnector {
     async fn fetch_inspections(&self) -> Result<Vec<LaInspectionAttrs>> {
         match self.fetch_inspections_csv().await {
             Ok(records) => {
-                info!(records = records.len(), "LA inspections loaded from CSV item");
+                info!(
+                    records = records.len(),
+                    "LA inspections loaded from CSV item"
+                );
                 Ok(records)
             }
             Err(csv_error) => {
@@ -596,8 +599,16 @@ mod tests {
             modified,
         };
         let items = vec![
-            item("Environmental Health Restaurant and Market Inventory 04-01-2026", 1, "old"),
-            item("Environmental Health Restaurant and Market Inventory 09-30-2026", 3, "new"),
+            item(
+                "Environmental Health Restaurant and Market Inventory 04-01-2026",
+                1,
+                "old",
+            ),
+            item(
+                "Environmental Health Restaurant and Market Inventory 09-30-2026",
+                3,
+                "new",
+            ),
             item("Restaurant and Market Inventory copy", 9, "unrelated"),
         ];
 
@@ -614,7 +625,12 @@ mod tests {
         let connector = LaCountyConnector::from_env();
         let rows = connector.fetch_inventory_feature_service().await.unwrap();
         assert!(rows.len() > 10_000, "only {} rows", rows.len());
-        assert!(rows.iter().filter(|row| row.facility_latitude.is_some()).count() > 10_000);
+        assert!(
+            rows.iter()
+                .filter(|row| row.facility_latitude.is_some())
+                .count()
+                > 10_000
+        );
     }
 
     /// Run with `cargo test -- --ignored la_live`.

@@ -185,10 +185,11 @@ impl LivesBatchConnector {
             ));
 
             if let Some(max_records) = self.max_records
-                && facilities.len() >= max_records {
-                    facilities.truncate(max_records);
-                    break;
-                }
+                && facilities.len() >= max_records
+            {
+                facilities.truncate(max_records);
+                break;
+            }
 
             if page_count == 0 {
                 break;

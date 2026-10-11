@@ -213,7 +213,11 @@ pub async fn record_vote(
         ));
     }
 
-    let exists = state.directory_service.get(&id).await.map_err(internal_error)?;
+    let exists = state
+        .directory_service
+        .get(&id)
+        .await
+        .map_err(internal_error)?;
     if exists.is_none() {
         return Err((StatusCode::NOT_FOUND, "Facility not found".to_owned()));
     }

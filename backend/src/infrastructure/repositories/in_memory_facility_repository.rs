@@ -99,7 +99,10 @@ impl FacilityRepository for InMemoryFacilityRepository {
             return Ok(HashMap::new());
         }
 
-        let id_set = facility_ids.iter().cloned().collect::<std::collections::HashSet<_>>();
+        let id_set = facility_ids
+            .iter()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
         let all_votes = self.votes.read().await;
         let mut summaries: HashMap<String, FacilityVoteSummary> = HashMap::new();
 
@@ -131,35 +134,37 @@ impl FacilityRepository for InMemoryFacilityRepository {
 
         // Text filtering
         if let Some(term) = query.q.as_ref().map(|v| v.trim().to_ascii_lowercase())
-            && !term.is_empty() {
-                facilities.retain(|f| {
-                    f.name.to_ascii_lowercase().contains(&term)
-                        || f.address.to_ascii_lowercase().contains(&term)
-                        || f.city.to_ascii_lowercase().contains(&term)
-                        || f.postal_code.contains(&term)
-                });
-            }
+            && !term.is_empty()
+        {
+            facilities.retain(|f| {
+                f.name.to_ascii_lowercase().contains(&term)
+                    || f.address.to_ascii_lowercase().contains(&term)
+                    || f.city.to_ascii_lowercase().contains(&term)
+                    || f.postal_code.contains(&term)
+            });
+        }
 
         // Jurisdiction filter
         if let Some(jurisdiction) = query
             .jurisdiction
             .as_ref()
             .map(|v| v.trim().to_ascii_lowercase())
-            && !jurisdiction.is_empty() && jurisdiction != "all" {
-                facilities.retain(|f| {
-                    f.jurisdiction.code() == jurisdiction
-                        || f.jurisdiction.label().eq_ignore_ascii_case(&jurisdiction)
-                });
-            }
+            && !jurisdiction.is_empty()
+            && jurisdiction != "all"
+        {
+            facilities.retain(|f| {
+                f.jurisdiction.code() == jurisdiction
+                    || f.jurisdiction.label().eq_ignore_ascii_case(&jurisdiction)
+            });
+        }
 
         // Geo-radius filter (only in browse mode, not text search)
         if !has_search_term
             && let (Some(lat), Some(lon), Some(radius)) =
                 (query.latitude, query.longitude, query.radius_miles)
-            {
-                facilities
-                    .retain(|f| haversine_miles(lat, lon, f.latitude, f.longitude) <= radius);
-            }
+        {
+            facilities.retain(|f| haversine_miles(lat, lon, f.latitude, f.longitude) <= radius);
+        }
 
         // Recent-only filter: use latest inspection date
         if query.recent_only.unwrap_or(false) {
@@ -177,12 +182,18 @@ impl FacilityRepository for InMemoryFacilityRepository {
         // Compute slice counts BEFORE score_slice filter
         let slice_counts = ScoreSliceCounts {
             all: facilities.len(),
-            elite: facilities.iter().filter(|f| f.trust_score >= ELITE_THRESHOLD).count(),
+            elite: facilities
+                .iter()
+                .filter(|f| f.trust_score >= ELITE_THRESHOLD)
+                .count(),
             solid: facilities
                 .iter()
                 .filter(|f| f.trust_score >= SOLID_THRESHOLD && f.trust_score < ELITE_THRESHOLD)
                 .count(),
-            watch: facilities.iter().filter(|f| f.trust_score < SOLID_THRESHOLD).count(),
+            watch: facilities
+                .iter()
+                .filter(|f| f.trust_score < SOLID_THRESHOLD)
+                .count(),
         };
 
         // Score slice filter
@@ -193,17 +204,16 @@ impl FacilityRepository for InMemoryFacilityRepository {
         {
             match slice.as_str() {
                 "elite" => facilities.retain(|f| f.trust_score >= ELITE_THRESHOLD),
-                "solid" => facilities.retain(|f| f.trust_score >= SOLID_THRESHOLD && f.trust_score < ELITE_THRESHOLD),
+                "solid" => facilities.retain(|f| {
+                    f.trust_score >= SOLID_THRESHOLD && f.trust_score < ELITE_THRESHOLD
+                }),
                 "watch" => facilities.retain(|f| f.trust_score < SOLID_THRESHOLD),
                 _ => {}
             }
         }
 
         // Sorting
-        let sort = query
-            .sort
-            .as_ref()
-            .map(|v| v.trim().to_ascii_lowercase());
+        let sort = query.sort.as_ref().map(|v| v.trim().to_ascii_lowercase());
         match sort.as_deref() {
             Some("recent_desc") => {
                 facilities.sort_by(|a, b| {
@@ -227,7 +237,11 @@ impl FacilityRepository for InMemoryFacilityRepository {
         let page_size = query.page_size.unwrap_or(50);
         let page = query.page.unwrap_or(1);
         let offset = (page - 1).saturating_mul(page_size);
-        let page_facilities = facilities.into_iter().skip(offset).take(page_size).collect();
+        let page_facilities = facilities
+            .into_iter()
+            .skip(offset)
+            .take(page_size)
+            .collect();
 
         Ok((page_facilities, total_count, slice_counts))
     }
@@ -327,23 +341,26 @@ impl FacilityRepository for InMemoryFacilityRepository {
             .jurisdiction
             .as_ref()
             .map(|v| v.trim().to_ascii_lowercase())
-            && !jurisdiction.is_empty() && jurisdiction != "all" {
-                facilities.retain(|f| {
-                    f.jurisdiction.code() == jurisdiction
-                        || f.jurisdiction.label().eq_ignore_ascii_case(&jurisdiction)
-                });
-            }
+            && !jurisdiction.is_empty()
+            && jurisdiction != "all"
+        {
+            facilities.retain(|f| {
+                f.jurisdiction.code() == jurisdiction
+                    || f.jurisdiction.label().eq_ignore_ascii_case(&jurisdiction)
+            });
+        }
 
         // Text filter
         if let Some(term) = query.q.as_ref().map(|v| v.trim().to_ascii_lowercase())
-            && !term.is_empty() {
-                facilities.retain(|f| {
-                    f.name.to_ascii_lowercase().contains(&term)
-                        || f.address.to_ascii_lowercase().contains(&term)
-                        || f.city.to_ascii_lowercase().contains(&term)
-                        || f.postal_code.contains(&term)
-                });
-            }
+            && !term.is_empty()
+        {
+            facilities.retain(|f| {
+                f.name.to_ascii_lowercase().contains(&term)
+                    || f.address.to_ascii_lowercase().contains(&term)
+                    || f.city.to_ascii_lowercase().contains(&term)
+                    || f.postal_code.contains(&term)
+            });
+        }
 
         facilities.sort_by_key(|facility| Reverse(facility.trust_score));
 

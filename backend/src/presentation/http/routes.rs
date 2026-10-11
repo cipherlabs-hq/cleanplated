@@ -15,14 +15,8 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/facilities/autocomplete",
             get(handlers::autocomplete),
         )
-        .route(
-            "/api/v1/facilities/{id}",
-            get(handlers::get_facility),
-        )
-        .route(
-            "/api/v1/facilities/{id}/vote",
-            post(handlers::record_vote),
-        )
+        .route("/api/v1/facilities/{id}", get(handlers::get_facility))
+        .route("/api/v1/facilities/{id}/vote", post(handlers::record_vote))
         .route("/api/v1/system/ingestion", get(handlers::ingestion_status))
         .route("/api/v1/system/refresh", post(handlers::trigger_refresh))
         .with_state(state)
