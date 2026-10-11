@@ -1,80 +1,82 @@
 <p align="center">
-  <img src="assets/cleanplated-logo.svg" alt="Cleanplated Logo" width="200">
+  <img src="assets/cleanplated-logo.svg" alt="CleanPlated logo" width="200">
 </p>
 
-# Cleanplated
+# CleanPlated
 
-Cleanplated centralizes Southern California restaurant health inspection data and exposes normalized Trust Scores through a mobile-first directory.
+CleanPlated is a mobile-first directory of Southern California restaurant health inspections,
+live at [cleanplated.com](https://cleanplated.com). Each county and city publishes its inspection
+data differently; CleanPlated pulls it into one schema and gives every facility a 0–100 trust
+score you can search by name, address, or distance.
 
-## Structure
+## How it works
 
-- `backend/`: Rust backend (clean architecture + ingestion scheduler)
-- `frontend/`: Vue 3 mobile-first client with IBM Carbon Design System
-- `infra/terraform/`: GCP bootstrap + deployment infrastructure
-- `cloudbuild/`: CI/CD configs for backend and frontend on `main`
-- `docs/research/socal-food-safety-data-strategy.md`: research blueprint and source references
+A daily ingestion job pulls public records from each source, normalizes them, and replaces the
+directory in one transaction:
 
-## Quick start
+| Source | Format |
+|---|---|
+| Los Angeles County | Published CSV items, with an ArcGIS FeatureServer fallback |
+| San Diego County | Socrata (SODA) API |
+| Riverside and San Bernardino counties | ArcGIS (LIVES batch) |
+| Orange County | Public closures API |
+| Pasadena | Public facility directory |
+| Long Beach | Scraped closures page |
 
-### 1. Environment Setup
+Along the way it:
+
+- **Retries each source** and records per-source health, so one broken county doesn't fail the
+  run. Status is at `GET /api/v1/system/ingestion`.
+- **Refuses to publish a bad refresh.** If no source succeeds, or the new dataset is under half
+  the size of the last one, the previous data stays live.
+- **Geocodes facilities that arrive without coordinates** using the U.S. Census batch geocoder,
+  with results cached in Postgres so each address is looked up once.
+- **Scores every facility 0–100** from whatever the source provides: a raw score, a letter grade,
+  or a placard color.
+
+Search combines Postgres full-text search, trigram fuzzy matching, and radius queries.
+
+## Stack
+
+- **Backend** (`backend/`): Rust, axum, tokio, sqlx on PostgreSQL. Layered as domain,
+  application, infrastructure, and presentation; repositories and data sources sit behind traits
+  with Postgres and in-memory implementations. See [`backend/README.md`](backend/README.md) for
+  the connectors and configuration.
+- **Frontend** (`frontend/`): Vue 3, TypeScript, Vite, IBM Carbon, Google Maps.
+- **Infrastructure** (`infra/terraform/`): Google Cloud Run (API, web, and the ingestion job),
+  Cloud Scheduler, Secret Manager, and Artifact Registry, all in Terraform.
+- **CI/CD** (`cloudbuild/`): Cloud Build deploys the backend and frontend on every push to
+  `main` that touches them.
+
+## Run it locally
 
 ```bash
-# Copy the environment template
-cp .env.example .env
-
-# Edit .env and add your Google Maps API key (required for map functionality)
-# VITE_GOOGLE_MAPS_API_KEY=your_api_key_here
-```
-
-**Google Maps API Key Setup:**
-1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-2. Create a new API key or use an existing one
-3. Enable the "Maps JavaScript API" for your project
-4. Configure API restrictions:
-   - **Application restrictions**: HTTP referrers (websites)
-   - **Website restrictions**: Add these URLs:
-     - `localhost:15173` (local development)
-     - `*.cleanplated.com/*` (production, if applicable)
-5. Add the API key to your `.env` file
-
-### 2. Start the Application
-
-```bash
-# Full stack with Docker Compose
+cp .env.example .env            # add VITE_GOOGLE_MAPS_API_KEY for the map view
 docker compose up --build
-
-# Seed the database with restaurant data (optional, for local development)
-./scripts/seed-database.sh
+./scripts/seed-database.sh      # optional: load a subset of live data (2–5 minutes)
 ```
 
-Services:
+- Frontend: http://localhost:15173
+- API: http://localhost:18080
 
-- Frontend: `http://localhost:15173`
-- Backend API: `http://localhost:18080`
-- Backend repository: PostgreSQL when `DATABASE_URL` is set (falls back to in-memory only if missing)
-- Postgres: internal compose service (`postgres:5432`) for local persistence
-- Redis: internal compose service (`redis:6379`, provisioned for planned caching migration)
+Without `DATABASE_URL` the backend uses an in-memory repository. The compose file also starts
+Redis, which nothing uses yet.
 
-### Database Seeding
+The Maps key needs the Maps JavaScript API enabled and should be restricted to HTTP referrers
+(`localhost:15173` locally).
 
-The local development environment starts with an empty database. To populate it with restaurant data for testing:
+## Tests
 
 ```bash
-# After starting the main services
-./scripts/seed-database.sh
+cd backend
+cargo test                      # unit tests, no network
+cargo test -- --ignored         # also hit the live county and Census APIs
 ```
 
-This will fetch a subset of data from public health APIs to populate your local database. The process typically takes 2-5 minutes.
+## Deployment
 
-**Manual seeding** (alternative):
-```bash
-docker compose --profile seed run --rm seed
-```
+Pushes to `main` deploy through Cloud Build triggers. To recreate them in a new project, connect
+the repository to Cloud Build and run `./scripts/create_cloudbuild_triggers.sh`.
 
-## Cloud Build (main triggers)
-
-After completing GitHub OAuth for the Cloud Build connection, run:
-
-```bash
-./scripts/create_cloudbuild_triggers.sh
-```
+`POST /api/v1/system/refresh` starts an ingestion run on demand. It needs
+`Authorization: Bearer $CLEANPLATED_ADMIN_TOKEN` and returns 404 when no token is configured.
