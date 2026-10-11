@@ -171,9 +171,14 @@ pub async fn ingestion_status(
     Ok(Json(serde_json::json!({ "data": stats })))
 }
 
+/// Starts an ingestion refresh. Requires `Authorization: Bearer <CLEANPLATED_ADMIN_TOKEN>`; the
+/// scheduled refresh runs as a Cloud Run Job and does not use this endpoint.
 pub async fn trigger_refresh(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
+    authorize_admin(state.admin_token.as_deref(), &headers)?;
+
     let ingestion_service = state.ingestion_service.clone();
     tokio::spawn(async move {
         if let Err(err) = ingestion_service.refresh().await {
@@ -296,4 +301,77 @@ fn extract_voter_key(headers: &HeaderMap) -> String {
         .filter(|value| !value.is_empty());
 
     from_real_ip.unwrap_or_else(|| "unknown".to_owned())
+}
+
+/// Admin endpoints are hidden (404) unless a token is configured, and need a matching bearer
+/// token (401) when one is.
+fn authorize_admin(
+    expected: Option<&str>,
+    headers: &HeaderMap,
+) -> Result<(), (StatusCode, String)> {
+    let Some(expected) = expected else {
+        return Err((StatusCode::NOT_FOUND, "Not found".to_owned()));
+    };
+    let provided = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .unwrap_or_default();
+    if constant_time_eq(provided.as_bytes(), expected.as_bytes()) {
+        Ok(())
+    } else {
+        Err((StatusCode::UNAUTHORIZED, "Unauthorized".to_owned()))
+    }
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+            == 0
+}
+
+#[cfg(test)]
+mod admin_auth_tests {
+    use axum::http::{HeaderValue, header::AUTHORIZATION};
+
+    use super::*;
+
+    fn bearer(token: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+        headers
+    }
+
+    #[test]
+    fn admin_endpoints_are_hidden_without_a_configured_token() {
+        let result = authorize_admin(None, &bearer("anything"));
+        assert_eq!(result.unwrap_err().0, StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn a_wrong_or_missing_token_is_rejected() {
+        assert_eq!(
+            authorize_admin(Some("secret-token"), &bearer("wrong"))
+                .unwrap_err()
+                .0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            authorize_admin(Some("secret-token"), &HeaderMap::new())
+                .unwrap_err()
+                .0,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[test]
+    fn the_configured_token_is_accepted() {
+        assert!(authorize_admin(Some("secret-token"), &bearer("secret-token")).is_ok());
+    }
 }

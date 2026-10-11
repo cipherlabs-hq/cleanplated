@@ -14,4 +14,7 @@ pub struct AppState {
     pub vote_service: Arc<VoteService>,
     pub vote_rate_limiter: RateLimiter,
     pub autocomplete_rate_limiter: RateLimiter,
+    /// Bearer token for admin endpoints (`CLEANPLATED_ADMIN_TOKEN`). When unset, admin endpoints
+    /// return 404.
+    pub admin_token: Option<String>,
 }

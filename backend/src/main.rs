@@ -82,6 +82,10 @@ async fn main() -> anyhow::Result<()> {
         vote_service: Arc::new(VoteService::new(repository)),
         vote_rate_limiter: RateLimiter::new(20, Duration::from_secs(60)),
         autocomplete_rate_limiter: RateLimiter::new(60, Duration::from_secs(60)),
+        admin_token: std::env::var("CLEANPLATED_ADMIN_TOKEN")
+            .ok()
+            .map(|token| token.trim().to_owned())
+            .filter(|token| !token.is_empty()),
     };
 
     let app = app_router(app_state, &settings);
