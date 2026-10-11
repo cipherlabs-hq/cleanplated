@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{cmp::Reverse, collections::HashMap};
 
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
@@ -35,10 +35,6 @@ impl FacilityRepository for InMemoryFacilityRepository {
         let mut write_guard = self.facilities.write().await;
         *write_guard = facilities;
         Ok(())
-    }
-
-    async fn list(&self) -> Result<Vec<Facility>, RepositoryError> {
-        Ok(self.facilities.read().await.clone())
     }
 
     async fn get_by_id(&self, id: &str) -> Result<Option<Facility>, RepositoryError> {
@@ -134,8 +130,8 @@ impl FacilityRepository for InMemoryFacilityRepository {
         let mut facilities = self.facilities.read().await.clone();
 
         // Text filtering
-        if let Some(term) = query.q.as_ref().map(|v| v.trim().to_ascii_lowercase()) {
-            if !term.is_empty() {
+        if let Some(term) = query.q.as_ref().map(|v| v.trim().to_ascii_lowercase())
+            && !term.is_empty() {
                 facilities.retain(|f| {
                     f.name.to_ascii_lowercase().contains(&term)
                         || f.address.to_ascii_lowercase().contains(&term)
@@ -143,31 +139,27 @@ impl FacilityRepository for InMemoryFacilityRepository {
                         || f.postal_code.contains(&term)
                 });
             }
-        }
 
         // Jurisdiction filter
         if let Some(jurisdiction) = query
             .jurisdiction
             .as_ref()
             .map(|v| v.trim().to_ascii_lowercase())
-        {
-            if !jurisdiction.is_empty() && jurisdiction != "all" {
+            && !jurisdiction.is_empty() && jurisdiction != "all" {
                 facilities.retain(|f| {
                     f.jurisdiction.code() == jurisdiction
                         || f.jurisdiction.label().eq_ignore_ascii_case(&jurisdiction)
                 });
             }
-        }
 
         // Geo-radius filter (only in browse mode, not text search)
-        if !has_search_term {
-            if let (Some(lat), Some(lon), Some(radius)) =
+        if !has_search_term
+            && let (Some(lat), Some(lon), Some(radius)) =
                 (query.latitude, query.longitude, query.radius_miles)
             {
                 facilities
                     .retain(|f| haversine_miles(lat, lon, f.latitude, f.longitude) <= radius);
             }
-        }
 
         // Recent-only filter: use latest inspection date
         if query.recent_only.unwrap_or(false) {
@@ -226,7 +218,7 @@ impl FacilityRepository for InMemoryFacilityRepository {
                 facilities.sort_by(|a, b| a.name.cmp(&b.name));
             }
             _ => {
-                facilities.sort_by(|a, b| b.trust_score.cmp(&a.trust_score));
+                facilities.sort_by_key(|facility| Reverse(facility.trust_score));
             }
         }
 
@@ -335,18 +327,16 @@ impl FacilityRepository for InMemoryFacilityRepository {
             .jurisdiction
             .as_ref()
             .map(|v| v.trim().to_ascii_lowercase())
-        {
-            if !jurisdiction.is_empty() && jurisdiction != "all" {
+            && !jurisdiction.is_empty() && jurisdiction != "all" {
                 facilities.retain(|f| {
                     f.jurisdiction.code() == jurisdiction
                         || f.jurisdiction.label().eq_ignore_ascii_case(&jurisdiction)
                 });
             }
-        }
 
         // Text filter
-        if let Some(term) = query.q.as_ref().map(|v| v.trim().to_ascii_lowercase()) {
-            if !term.is_empty() {
+        if let Some(term) = query.q.as_ref().map(|v| v.trim().to_ascii_lowercase())
+            && !term.is_empty() {
                 facilities.retain(|f| {
                     f.name.to_ascii_lowercase().contains(&term)
                         || f.address.to_ascii_lowercase().contains(&term)
@@ -354,9 +344,8 @@ impl FacilityRepository for InMemoryFacilityRepository {
                         || f.postal_code.contains(&term)
                 });
             }
-        }
 
-        facilities.sort_by(|a, b| b.trust_score.cmp(&a.trust_score));
+        facilities.sort_by_key(|facility| Reverse(facility.trust_score));
 
         Ok(facilities
             .into_iter()

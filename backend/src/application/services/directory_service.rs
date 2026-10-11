@@ -84,7 +84,7 @@ impl DirectoryService {
         let inspections_count = facility.inspections.len();
         let vote_summaries = self
             .repository
-            .get_facility_vote_summaries(&[facility.id.clone()])
+            .get_facility_vote_summaries(std::slice::from_ref(&facility.id))
             .await?;
         let vote_summary = vote_summaries
             .get(&facility.id)

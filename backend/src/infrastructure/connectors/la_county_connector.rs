@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, time::Duration};
+use std::{cmp::Reverse, collections::HashMap, env, time::Duration};
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -134,12 +134,11 @@ impl LaCountyConnector {
             let page_count = response.features.len();
             rows.extend(response.features.into_iter().map(|f| f.attributes));
 
-            if let Some(max_records) = self.max_records {
-                if rows.len() >= max_records {
+            if let Some(max_records) = self.max_records
+                && rows.len() >= max_records {
                     rows.truncate(max_records);
                     break;
                 }
-            }
 
             if page_count == 0 {
                 break;
@@ -272,7 +271,7 @@ impl LaCountyConnector {
             })
             .collect::<Vec<_>>();
 
-        rows.sort_by(|left, right| right.activity_date.cmp(&left.activity_date));
+        rows.sort_by_key(|row| Reverse(row.activity_date));
         if let Some(max_records) = self.max_records {
             rows.truncate(max_records);
         }

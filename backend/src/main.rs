@@ -27,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
     let settings = Settings::from_env();
     let repository = build_repository(&settings).await?;
 
-    let trust_score_service = Arc::new(TrustScoreService::default());
+    let trust_score_service = Arc::new(TrustScoreService);
     let ingestion_service = Arc::new(IngestionService::new(
         repository.clone(),
         trust_score_service,

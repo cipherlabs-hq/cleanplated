@@ -299,17 +299,6 @@ impl FacilityRepository for PostgresFacilityRepository {
         Ok(())
     }
 
-    async fn list(&self) -> Result<Vec<Facility>, RepositoryError> {
-        let rows = sqlx::query(
-            "SELECT id, source_id, name, address, city, state, postal_code, latitude, longitude, jurisdiction, trust_score, inspections, updated_at FROM facilities",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(to_repository_error)?;
-
-        rows.iter().map(map_facility_row).collect()
-    }
-
     async fn get_by_id(&self, id: &str) -> Result<Option<Facility>, RepositoryError> {
         let maybe_row = sqlx::query(
             "SELECT id, source_id, name, address, city, state, postal_code, latitude, longitude, jurisdiction, trust_score, inspections, updated_at FROM facilities WHERE id = $1",
@@ -523,8 +512,7 @@ impl FacilityRepository for PostgresFacilityRepository {
             .jurisdiction
             .as_ref()
             .map(|v| v.trim().to_ascii_lowercase())
-        {
-            if !jurisdiction.is_empty() && jurisdiction != "all" {
+            && !jurisdiction.is_empty() && jurisdiction != "all" {
                 let code = Jurisdiction::from_code(&jurisdiction)
                     .or_else(|| Jurisdiction::from_label(&jurisdiction))
                     .map(|j| j.code().to_owned())
@@ -532,7 +520,6 @@ impl FacilityRepository for PostgresFacilityRepository {
                 builder.push(" AND LOWER(f.jurisdiction) = ");
                 builder.push_bind(code);
             }
-        }
 
         // Recent-only filter: use latest inspection date, not updated_at.
         // Facilities with no inspections are excluded (MAX returns NULL → filtered out).
@@ -546,7 +533,7 @@ impl FacilityRepository for PostgresFacilityRepository {
         builder.push(")");
 
         // ─── counts CTE: pre-slice totals (always available) ───
-        builder.push(&format!(
+        builder.push(format!(
             ", counts AS (SELECT COUNT(*) AS all_count, \
              COUNT(*) FILTER(WHERE trust_score >= {ELITE_THRESHOLD}) AS elite_count, \
              COUNT(*) FILTER(WHERE trust_score >= {SOLID_THRESHOLD} AND trust_score < {ELITE_THRESHOLD}) AS solid_count, \
@@ -562,9 +549,9 @@ impl FacilityRepository for PostgresFacilityRepository {
             .map(|v| v.trim().to_ascii_lowercase())
         {
             match slice.as_str() {
-                "elite" => { builder.push(&format!(" AND trust_score >= {ELITE_THRESHOLD}")); }
-                "solid" => { builder.push(&format!(" AND trust_score >= {SOLID_THRESHOLD} AND trust_score < {ELITE_THRESHOLD}")); }
-                "watch" => { builder.push(&format!(" AND trust_score < {SOLID_THRESHOLD}")); }
+                "elite" => { builder.push(format!(" AND trust_score >= {ELITE_THRESHOLD}")); }
+                "solid" => { builder.push(format!(" AND trust_score >= {SOLID_THRESHOLD} AND trust_score < {ELITE_THRESHOLD}")); }
+                "watch" => { builder.push(format!(" AND trust_score < {SOLID_THRESHOLD}")); }
                 _ => {}
             }
         }
@@ -593,11 +580,11 @@ impl FacilityRepository for PostgresFacilityRepository {
                 if has_search_term {
                     // Safety: all interpolated values are compile-time Rust constants, not user input.
                     if has_geo {
-                        builder.push(&format!(
+                        builder.push(format!(
                             " ORDER BY (fts_rank * {FTS_RANK_WEIGHT} + name_sim * {NAME_SIM_WEIGHT} + GREATEST(0.0, {GEO_PROXIMITY_MAX_BONUS} - dist_meters / {GEO_PROXIMITY_DECAY_METERS})) DESC, trust_score DESC",
                         ));
                     } else {
-                        builder.push(&format!(
+                        builder.push(format!(
                             " ORDER BY (fts_rank * {FTS_RANK_WEIGHT} + name_sim * {NAME_SIM_WEIGHT}) DESC, trust_score DESC",
                         ));
                     }
@@ -798,8 +785,7 @@ impl FacilityRepository for PostgresFacilityRepository {
             .jurisdiction
             .as_ref()
             .map(|v| v.trim().to_ascii_lowercase())
-        {
-            if !jurisdiction.is_empty() && jurisdiction != "all" {
+            && !jurisdiction.is_empty() && jurisdiction != "all" {
                 let code = Jurisdiction::from_code(&jurisdiction)
                     .or_else(|| Jurisdiction::from_label(&jurisdiction))
                     .map(|j| j.code().to_owned())
@@ -807,7 +793,6 @@ impl FacilityRepository for PostgresFacilityRepository {
                 builder.push(" AND LOWER(jurisdiction) = ");
                 builder.push_bind(code);
             }
-        }
 
         // Text search filter
         if has_search_term {

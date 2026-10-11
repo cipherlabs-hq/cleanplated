@@ -63,11 +63,10 @@ impl SanDiegoConnector {
         let mut headers = HeaderMap::new();
         if let Ok(app_token) = env::var("CLEANPLATED_SD_SOCRATA_APP_TOKEN") {
             let trimmed = app_token.trim();
-            if !trimmed.is_empty() {
-                if let Ok(value) = HeaderValue::from_str(trimmed) {
+            if !trimmed.is_empty()
+                && let Ok(value) = HeaderValue::from_str(trimmed) {
                     headers.insert(HeaderName::from_static("x-app-token"), value);
                 }
-            }
         }
 
         let client = reqwest::Client::builder()
@@ -149,12 +148,11 @@ impl HealthDataConnector for SanDiegoConnector {
             let page_count = page.len();
             rows.extend(page);
 
-            if let Some(max_records) = self.max_records {
-                if rows.len() >= max_records {
+            if let Some(max_records) = self.max_records
+                && rows.len() >= max_records {
                     rows.truncate(max_records);
                     break;
                 }
-            }
 
             if page_count == 0 || page_count < self.page_size {
                 break;
