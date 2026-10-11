@@ -1,4 +1,4 @@
-# Trustaraunt Backend (Rust + Clean Architecture)
+# CleanPlated Backend (Rust + Clean Architecture)
 
 This backend is structured around clean architecture boundaries:
 

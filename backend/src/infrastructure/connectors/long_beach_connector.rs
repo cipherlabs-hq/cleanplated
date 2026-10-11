@@ -45,7 +45,7 @@ impl LongBeachConnector {
 
         let client = Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
-            .user_agent("TrustarauntBot/1.0 (+https://trustaraunt.com)")
+            .user_agent("CleanPlatedBot/1.0 (+https://cleanplated.com)")
             .build()
             .unwrap_or_else(|_| Client::new());
 
