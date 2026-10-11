@@ -10,6 +10,7 @@ use crate::domain::{
         ScoreSliceCounts, SystemIngestionStatus, VoteValue,
     },
     errors::RepositoryError,
+    geocoding::GeocodeResult,
     repositories::FacilityRepository,
 };
 
@@ -21,6 +22,7 @@ pub struct InMemoryFacilityRepository {
     facilities: RwLock<Vec<Facility>>,
     ingestion_status: RwLock<Option<SystemIngestionStatus>>,
     votes: RwLock<HashMap<(String, String), VoteValue>>,
+    geocodes: RwLock<HashMap<String, GeocodeResult>>,
 }
 
 impl InMemoryFacilityRepository {
@@ -369,6 +371,25 @@ impl FacilityRepository for InMemoryFacilityRepository {
             .take(capped)
             .map(|f| (f.id, f.name, f.latitude, f.longitude, f.trust_score))
             .collect())
+    }
+
+    async fn get_geocodes(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, GeocodeResult>, RepositoryError> {
+        let cache = self.geocodes.read().await;
+        Ok(keys
+            .iter()
+            .filter_map(|key| cache.get(key).map(|result| (key.clone(), result.clone())))
+            .collect())
+    }
+
+    async fn save_geocodes(&self, results: &[GeocodeResult]) -> Result<(), RepositoryError> {
+        let mut cache = self.geocodes.write().await;
+        for result in results {
+            cache.insert(result.key.clone(), result.clone());
+        }
+        Ok(())
     }
 }
 

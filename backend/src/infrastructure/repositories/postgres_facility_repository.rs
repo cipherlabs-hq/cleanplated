@@ -10,6 +10,7 @@ use crate::domain::{
         VoteValue,
     },
     errors::RepositoryError,
+    geocoding::GeocodeResult,
     repositories::FacilityRepository,
 };
 
@@ -114,6 +115,22 @@ impl PostgresFacilityRepository {
             r#"
             CREATE INDEX IF NOT EXISTS idx_facility_votes_facility_id
             ON facility_votes (facility_id)
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(to_repository_error)?;
+
+        // Address -> coordinates from the geocoder. Kept separate from `facilities`, which is
+        // replaced on every ingestion run, so each address is only geocoded once.
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS geocode_cache (
+                address_key TEXT PRIMARY KEY,
+                latitude DOUBLE PRECISION,
+                longitude DOUBLE PRECISION,
+                geocoded_at TIMESTAMPTZ NOT NULL
+            )
             "#,
         )
         .execute(&self.pool)
@@ -840,6 +857,63 @@ impl FacilityRepository for PostgresFacilityRepository {
 
         Ok(results)
     }
+
+    async fn get_geocodes(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, GeocodeResult>, RepositoryError> {
+        if keys.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let rows = sqlx::query(
+            "SELECT address_key, latitude, longitude, geocoded_at FROM geocode_cache WHERE address_key = ANY($1)",
+        )
+        .bind(keys)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(to_repository_error)?;
+
+        rows.iter()
+            .map(|row| {
+                let key: String = row.try_get("address_key").map_err(to_repository_error)?;
+                let latitude: Option<f64> = row.try_get("latitude").map_err(to_repository_error)?;
+                let longitude: Option<f64> =
+                    row.try_get("longitude").map_err(to_repository_error)?;
+                Ok((
+                    key.clone(),
+                    GeocodeResult {
+                        key,
+                        coordinates: latitude.zip(longitude),
+                        geocoded_at: row.try_get("geocoded_at").map_err(to_repository_error)?,
+                    },
+                ))
+            })
+            .collect()
+    }
+
+    async fn save_geocodes(&self, results: &[GeocodeResult]) -> Result<(), RepositoryError> {
+        for chunk in results.chunks(1_000) {
+            let mut builder = QueryBuilder::<Postgres>::new(
+                "INSERT INTO geocode_cache (address_key, latitude, longitude, geocoded_at) ",
+            );
+            builder.push_values(chunk, |mut row, result| {
+                row.push_bind(&result.key)
+                    .push_bind(result.coordinates.map(|(latitude, _)| latitude))
+                    .push_bind(result.coordinates.map(|(_, longitude)| longitude))
+                    .push_bind(result.geocoded_at);
+            });
+            builder.push(
+                " ON CONFLICT (address_key) DO UPDATE SET latitude = EXCLUDED.latitude, longitude = EXCLUDED.longitude, geocoded_at = EXCLUDED.geocoded_at",
+            );
+            builder
+                .build()
+                .execute(&self.pool)
+                .await
+                .map_err(to_repository_error)?;
+        }
+        Ok(())
+    }
 }
 
 fn map_facility_row(row: &sqlx::postgres::PgRow) -> Result<Facility, RepositoryError> {
@@ -877,4 +951,50 @@ fn map_facility_row(row: &sqlx::postgres::PgRow) -> Result<Facility, RepositoryE
 
 fn to_repository_error(error: impl std::fmt::Display) -> RepositoryError {
     RepositoryError::message(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, Utc};
+
+    use super::*;
+
+    /// Needs a throwaway Postgres. Run with
+    /// `CLEANPLATED_TEST_DATABASE_URL=postgres://... cargo test -- --ignored geocode_cache`.
+    #[tokio::test]
+    #[ignore]
+    async fn geocode_cache_round_trips_matches_misses_and_updates() {
+        let url = std::env::var("CLEANPLATED_TEST_DATABASE_URL").unwrap();
+        let repository = PostgresFacilityRepository::connect(&url).await.unwrap();
+        let earlier = Utc::now() - Duration::days(40);
+        let hit = GeocodeResult {
+            key: "100 main st|los angeles|ca|90001".to_owned(),
+            coordinates: Some((34.1, -118.3)),
+            geocoded_at: earlier,
+        };
+        let miss = GeocodeResult {
+            key: "1 nowhere rd|los angeles|ca|90001".to_owned(),
+            coordinates: None,
+            geocoded_at: earlier,
+        };
+        repository
+            .save_geocodes(&[hit.clone(), miss.clone()])
+            .await
+            .unwrap();
+
+        let retried = GeocodeResult {
+            coordinates: Some((34.2, -118.4)),
+            geocoded_at: Utc::now(),
+            ..miss.clone()
+        };
+        repository.save_geocodes(&[retried.clone()]).await.unwrap();
+
+        let keys = vec![hit.key.clone(), miss.key.clone(), "unknown".to_owned()];
+        let cached = repository.get_geocodes(&keys).await.unwrap();
+
+        assert_eq!(cached.len(), 2);
+        assert_eq!(cached[&hit.key].coordinates, Some((34.1, -118.3)));
+        assert_eq!(cached[&miss.key].coordinates, Some((34.2, -118.4)));
+        assert!(repository.get_geocodes(&[]).await.unwrap().is_empty());
+    }
 }

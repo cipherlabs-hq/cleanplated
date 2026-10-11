@@ -9,6 +9,10 @@ pub struct Settings {
     pub run_mode: RunMode,
     pub database_url: Option<String>,
     pub enable_background_ingestion: bool,
+    /// Geocode facilities whose source had no coordinates (on by default).
+    pub geocoding_enabled: bool,
+    /// Cap on new geocoder lookups per refresh; cached addresses are always applied.
+    pub max_geocodes_per_run: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,6 +60,19 @@ impl Settings {
                     )
                 })
                 .unwrap_or(false),
+            geocoding_enabled: env::var("CLEANPLATED_GEOCODING_ENABLED")
+                .ok()
+                .map(|value| {
+                    !matches!(
+                        value.to_ascii_lowercase().as_str(),
+                        "0" | "false" | "no" | "off"
+                    )
+                })
+                .unwrap_or(true),
+            max_geocodes_per_run: env::var("CLEANPLATED_GEOCODING_MAX_PER_RUN")
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(25_000),
         }
     }
 }

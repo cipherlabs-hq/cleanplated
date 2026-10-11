@@ -903,10 +903,10 @@ fn map_record(
         Jurisdiction::Pasadena => (34.1478, -118.1445),
         _ => (34.0522, -118.2437),
     };
-    let latitude = rec_f64(&record, &["latitude", "Latitude", "FACILITY_LATITUDE"])
-        .unwrap_or(default_coordinates.0);
-    let longitude = rec_f64(&record, &["longitude", "Longitude", "FACILITY_LONGITUDE"])
-        .unwrap_or(default_coordinates.1);
+    let source_coordinates = rec_f64(&record, &["latitude", "Latitude", "FACILITY_LATITUDE"]).zip(
+        rec_f64(&record, &["longitude", "Longitude", "FACILITY_LONGITUDE"]),
+    );
+    let (latitude, longitude) = source_coordinates.unwrap_or(default_coordinates);
 
     let inspected_at = rec_datetime(
         &record,
@@ -959,6 +959,7 @@ fn map_record(
         postal_code,
         latitude,
         longitude,
+        coordinates_approximate: source_coordinates.is_none(),
         jurisdiction,
         inspected_at,
         raw_score,

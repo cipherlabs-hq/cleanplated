@@ -334,14 +334,11 @@ impl HealthDataConnector for LaCountyConnector {
                 let facility_id = inspection.facility_id?.trim().to_owned();
                 let inv = inventory.get(&facility_id);
 
-                let (latitude, longitude) = inv
-                    .map(|record| {
-                        (
-                            record.facility_latitude.unwrap_or(34.0522),
-                            record.facility_longitude.unwrap_or(-118.2437),
-                        )
-                    })
-                    .unwrap_or((34.0522, -118.2437));
+                // Facilities with inspections but no row in the current inventory have no
+                // coordinates; they get downtown LA here and are geocoded during ingestion.
+                let source_coordinates =
+                    inv.and_then(|record| record.facility_latitude.zip(record.facility_longitude));
+                let (latitude, longitude) = source_coordinates.unwrap_or((34.0522, -118.2437));
 
                 let inspected_at = inspection
                     .activity_date
@@ -372,6 +369,7 @@ impl HealthDataConnector for LaCountyConnector {
                         .unwrap_or_default(),
                     latitude,
                     longitude,
+                    coordinates_approximate: source_coordinates.is_none(),
                     jurisdiction: Jurisdiction::LosAngelesCounty,
                     inspected_at,
                     raw_score: inspection.score.map(|score| score as f32),

@@ -7,6 +7,7 @@ use crate::domain::{
         ScoreSliceCounts, SystemIngestionStatus, VoteValue,
     },
     errors::RepositoryError,
+    geocoding::GeocodeResult,
 };
 
 #[async_trait]
@@ -48,4 +49,9 @@ pub trait FacilityRepository: Send + Sync {
         query: &FacilitySearchQuery,
         limit: usize,
     ) -> Result<Vec<(String, String, f64, f64, u8)>, RepositoryError>;
+    async fn get_geocodes(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, GeocodeResult>, RepositoryError>;
+    async fn save_geocodes(&self, results: &[GeocodeResult]) -> Result<(), RepositoryError>;
 }

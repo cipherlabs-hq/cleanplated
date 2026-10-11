@@ -128,6 +128,27 @@ Config:
 If CPRA URLs are omitted, live fallbacks run automatically. Disable fallbacks only if
 you intentionally want CPRA-only behavior.
 
+## Geocoding
+
+Some sources publish addresses without coordinates (San Diego permits, Long Beach closures, and LA
+inspections for facilities missing from the current inventory). Connectors give those a fallback
+point and mark them `coordinates_approximate`. After stitching, ingestion geocodes their addresses
+with the U.S. Census Bureau batch geocoder and moves them to the result.
+
+Results, including addresses with no match, are stored in the `geocode_cache` table, which
+survives the `facilities` rebuild on every run. Only new addresses are looked up, so the first run
+takes a few minutes and later runs take seconds. Unmatched addresses are retried after 30 days, and
+matches outside Southern California are rejected. A geocoder failure is logged and leaves the
+fallback in place; it never fails the refresh.
+
+Config:
+
+- `CLEANPLATED_GEOCODING_ENABLED` (default `true`)
+- `CLEANPLATED_GEOCODING_MAX_PER_RUN` (default `25000` new lookups per refresh)
+- `CLEANPLATED_GEOCODER_BATCH_SIZE` (default `1000`, max `10000`)
+- `CLEANPLATED_GEOCODER_CONCURRENCY` (default `4`)
+- `CLEANPLATED_GEOCODER_TIMEOUT_SECS` (default `300`)
+
 ## Run with Docker Compose
 
 From repository root:

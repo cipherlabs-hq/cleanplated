@@ -12,6 +12,7 @@ use config::{RunMode, Settings};
 use domain::repositories::FacilityRepository;
 use infrastructure::{
     connectors::default_connectors,
+    geocoding::CensusGeocoder,
     repositories::{InMemoryFacilityRepository, PostgresFacilityRepository},
     scheduler,
 };
@@ -28,11 +29,18 @@ async fn main() -> anyhow::Result<()> {
     let repository = build_repository(&settings).await?;
 
     let trust_score_service = Arc::new(TrustScoreService);
-    let ingestion_service = Arc::new(IngestionService::new(
+    let mut ingestion_service = IngestionService::new(
         repository.clone(),
         trust_score_service,
         default_connectors(),
-    ));
+    );
+    if settings.geocoding_enabled {
+        ingestion_service = ingestion_service.with_geocoder(
+            Arc::new(CensusGeocoder::from_env()),
+            settings.max_geocodes_per_run,
+        );
+    }
+    let ingestion_service = Arc::new(ingestion_service);
 
     if settings.run_mode == RunMode::RefreshOnce {
         info!("Running one-shot ingestion refresh");

@@ -13,6 +13,9 @@ pub struct SourceFacilityInput {
     pub postal_code: String,
     pub latitude: f64,
     pub longitude: f64,
+    /// True when the source had no coordinates and the connector used a fixed fallback point
+    /// (a city or county centre). Ingestion geocodes these by address.
+    pub coordinates_approximate: bool,
     pub jurisdiction: Jurisdiction,
     pub inspected_at: DateTime<Utc>,
     pub raw_score: Option<f32>,

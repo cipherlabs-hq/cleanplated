@@ -132,8 +132,10 @@ impl HealthDataConnector for LongBeachConnector {
                 city: "Long Beach".to_owned(),
                 state: "CA".to_owned(),
                 postal_code: String::new(),
+                // The closures page lists addresses only; ingestion geocodes them.
                 latitude: 33.7701,
                 longitude: -118.1937,
+                coordinates_approximate: true,
                 jurisdiction: Jurisdiction::LongBeach,
                 inspected_at,
                 raw_score,

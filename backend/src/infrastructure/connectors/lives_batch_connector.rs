@@ -142,10 +142,10 @@ impl LivesBatchConnector {
                     let postal_code = attr_string(&attrs, &["Zip", "ZIP", "zip", "postal_code"])
                         .unwrap_or_default();
 
-                    let latitude = attr_f64(&attrs, &["Latitude", "LATITUDE", "latitude"])
-                        .unwrap_or(default_coordinates.0);
-                    let longitude = attr_f64(&attrs, &["Longitude", "LONGITUDE", "longitude"])
-                        .unwrap_or(default_coordinates.1);
+                    let source_coordinates =
+                        attr_f64(&attrs, &["Latitude", "LATITUDE", "latitude"])
+                            .zip(attr_f64(&attrs, &["Longitude", "LONGITUDE", "longitude"]));
+                    let (latitude, longitude) = source_coordinates.unwrap_or(default_coordinates);
 
                     let raw_score =
                         attr_f64(&attrs, &["Score", "SCORE", "score"]).map(|score| score as f32);
@@ -174,6 +174,7 @@ impl LivesBatchConnector {
                         postal_code,
                         latitude,
                         longitude,
+                        coordinates_approximate: source_coordinates.is_none(),
                         jurisdiction: jurisdiction.clone(),
                         inspected_at,
                         raw_score,

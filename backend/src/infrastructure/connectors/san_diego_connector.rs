@@ -181,16 +181,14 @@ fn map_row_to_source_input(row: SanDiegoPermitRow) -> Option<SourceFacilityInput
     let name = row.record_name?;
     let city = row.city.unwrap_or_else(|| "San Diego".to_owned());
 
-    // Most current records in c5ez-ufrd omit coordinates. Use city-level fallback
-    // to keep the directory searchable until the full graded inspection feed is wired.
-    let latitude = row
+    // Current records in c5ez-ufrd omit coordinates. Use a city-level fallback here; ingestion
+    // then geocodes the address.
+    let source_coordinates = row
         .latitude
         .and_then(|value| value.parse::<f64>().ok())
-        .unwrap_or_else(|| city_fallback_coordinates(&city).0);
-    let longitude = row
-        .longitude
-        .and_then(|value| value.parse::<f64>().ok())
-        .unwrap_or_else(|| city_fallback_coordinates(&city).1);
+        .zip(row.longitude.and_then(|value| value.parse::<f64>().ok()));
+    let (latitude, longitude) =
+        source_coordinates.unwrap_or_else(|| city_fallback_coordinates(&city));
 
     let inspected_at = row
         .last_updated
@@ -212,6 +210,7 @@ fn map_row_to_source_input(row: SanDiegoPermitRow) -> Option<SourceFacilityInput
         postal_code: row.zip.unwrap_or_default(),
         latitude,
         longitude,
+        coordinates_approximate: source_coordinates.is_none(),
         jurisdiction: Jurisdiction::SanDiegoCounty,
         inspected_at,
         raw_score,
