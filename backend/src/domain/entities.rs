@@ -37,6 +37,19 @@ impl Jurisdiction {
         }
     }
 
+    /// A central point used when a record has no usable coordinates (latitude, longitude).
+    pub fn centre(&self) -> (f64, f64) {
+        match self {
+            Self::LosAngelesCounty => (34.0522, -118.2437),
+            Self::SanDiegoCounty => (32.7157, -117.1611),
+            Self::LongBeach => (33.7701, -118.1937),
+            Self::RiversideCounty => (33.9806, -117.3755),
+            Self::SanBernardinoCounty => (34.1083, -117.2898),
+            Self::OrangeCounty => (33.7175, -117.8311),
+            Self::Pasadena => (34.1478, -118.1445),
+        }
+    }
+
     pub fn all() -> &'static [Self] {
         &[
             Self::LosAngelesCounty,

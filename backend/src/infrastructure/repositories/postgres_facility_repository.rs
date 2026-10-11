@@ -987,7 +987,10 @@ mod tests {
             geocoded_at: Utc::now(),
             ..miss.clone()
         };
-        repository.save_geocodes(&[retried.clone()]).await.unwrap();
+        repository
+            .save_geocodes(std::slice::from_ref(&retried))
+            .await
+            .unwrap();
 
         let keys = vec![hit.key.clone(), miss.key.clone(), "unknown".to_owned()];
         let cached = repository.get_geocodes(&keys).await.unwrap();

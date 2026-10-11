@@ -10,7 +10,7 @@ use reqwest::{
 use tokio::{sync::Semaphore, task::JoinSet, time::sleep};
 use tracing::{info, warn};
 
-use crate::domain::geocoding::{GeocodeRequest, GeocodeResult, Geocoder};
+use crate::domain::geocoding::{GeocodeRequest, GeocodeResult, Geocoder, in_southern_california};
 
 /// The U.S. Census Bureau's free batch geocoder. It takes up to 10,000 addresses per request;
 /// smaller batches keep one slow or failed request from losing much work.
@@ -21,11 +21,6 @@ const DEFAULT_CONCURRENCY: usize = 4;
 const DEFAULT_TIMEOUT_SECS: u64 = 300;
 /// The Census service occasionally stalls on one batch; a second attempt usually succeeds.
 const BATCH_ATTEMPTS: u32 = 2;
-
-/// Every source is in Southern California, so a match outside this box is a wrong match (for
-/// example, a same-named street in another state) and is treated as no match.
-const SOCAL_LATITUDE: (f64, f64) = (32.4, 35.9);
-const SOCAL_LONGITUDE: (f64, f64) = (-121.0, -114.0);
 
 #[derive(Clone)]
 pub struct CensusGeocoder {
@@ -202,11 +197,6 @@ fn parse_lon_lat(value: &str) -> Option<(f64, f64)> {
         latitude.trim().parse().ok()?,
         longitude.trim().parse().ok()?,
     ))
-}
-
-fn in_southern_california(latitude: f64, longitude: f64) -> bool {
-    (SOCAL_LATITUDE.0..=SOCAL_LATITUDE.1).contains(&latitude)
-        && (SOCAL_LONGITUDE.0..=SOCAL_LONGITUDE.1).contains(&longitude)
 }
 
 #[cfg(test)]

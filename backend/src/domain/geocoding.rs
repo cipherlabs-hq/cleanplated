@@ -27,6 +27,16 @@ pub trait Geocoder: Send + Sync {
     async fn geocode(&self, requests: &[GeocodeRequest]) -> anyhow::Result<Vec<GeocodeResult>>;
 }
 
+/// Every source is in Southern California. Coordinates outside this box are bad data (sources
+/// send 0,0 for "unknown") or a wrong geocoder match.
+const SOCAL_LATITUDE: (f64, f64) = (32.4, 35.9);
+const SOCAL_LONGITUDE: (f64, f64) = (-121.0, -114.0);
+
+pub fn in_southern_california(latitude: f64, longitude: f64) -> bool {
+    (SOCAL_LATITUDE.0..=SOCAL_LATITUDE.1).contains(&latitude)
+        && (SOCAL_LONGITUDE.0..=SOCAL_LONGITUDE.1).contains(&longitude)
+}
+
 /// Builds the cache key for an address: trimmed, lowercased, and pipe-separated.
 pub fn address_key(street: &str, city: &str, state: &str, postal_code: &str) -> String {
     [street, city, state, postal_code]

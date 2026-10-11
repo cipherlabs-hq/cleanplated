@@ -12,7 +12,7 @@ use crate::{
     },
     domain::{
         entities::{ConnectorIngestionStatus, Facility, Inspection, SystemIngestionStatus},
-        geocoding::{GeocodeRequest, GeocodeResult, Geocoder, address_key},
+        geocoding::{GeocodeRequest, GeocodeResult, Geocoder, address_key, in_southern_california},
         repositories::FacilityRepository,
     },
     infrastructure::connectors::HealthDataConnector,
@@ -149,6 +149,13 @@ impl IngestionService {
             }
         }
 
+        let out_of_region = mark_out_of_region_coordinates(&mut stitched);
+        if out_of_region > 0 {
+            info!(
+                records = out_of_region,
+                "Source coordinates outside Southern California; geocoding by address instead"
+            );
+        }
         self.place_approximate_records(&mut stitched).await;
 
         let facilities = stitched
@@ -340,6 +347,20 @@ fn dedupe_key(record: &SourceFacilityInput) -> String {
         record.city.trim().to_ascii_lowercase(),
         record.postal_code.trim().to_ascii_lowercase()
     )
+}
+
+/// Treats source coordinates outside Southern California (usually 0,0 for "unknown") as missing:
+/// moves the record to its jurisdiction's centre and marks it approximate so it gets geocoded.
+fn mark_out_of_region_coordinates(stitched: &mut HashMap<String, SourceFacilityInput>) -> usize {
+    let mut marked = 0usize;
+    for record in stitched.values_mut() {
+        if !in_southern_california(record.latitude, record.longitude) {
+            (record.latitude, record.longitude) = record.jurisdiction.centre();
+            record.coordinates_approximate = true;
+            marked += 1;
+        }
+    }
+    marked
 }
 
 /// Moves every approximate record whose address has geocoded coordinates onto them, and returns
@@ -551,6 +572,31 @@ mod tests {
             .unwrap();
 
         assert_eq!(geocoder.lookups.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn zero_coordinates_are_treated_as_missing_and_geocoded() {
+        let repository = Arc::new(InMemoryFacilityRepository::new());
+        let mut zeroed = record("zeroed", "100 Main St", false);
+        (zeroed.latitude, zeroed.longitude) = (0.0, 0.0);
+        let mut unmatched = record("unmatched", "1 Nowhere Rd", false);
+        (unmatched.latitude, unmatched.longitude) = (0.0, 0.0);
+
+        service(
+            repository.clone(),
+            vec![zeroed, unmatched],
+            Arc::new(FakeGeocoder::default()),
+            100,
+        )
+        .refresh()
+        .await
+        .unwrap();
+
+        assert_eq!(coordinates(&repository, "zeroed").await, GEOCODED);
+        assert_eq!(
+            coordinates(&repository, "unmatched").await,
+            Jurisdiction::LosAngelesCounty.centre()
+        );
     }
 
     #[test]
