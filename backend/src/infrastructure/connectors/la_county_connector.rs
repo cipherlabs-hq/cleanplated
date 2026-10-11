@@ -5,15 +5,21 @@ use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use reqwest::Client;
 use serde::{Deserialize, de::DeserializeOwned};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::{
     application::dto::SourceFacilityInput, domain::entities::Jurisdiction,
     infrastructure::connectors::HealthDataConnector,
 };
 
-const DEFAULT_INVENTORY_URL: &str = "https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inventory_04012026/FeatureServer";
-const DEFAULT_INSPECTIONS_URL: &str = "https://services.arcgis.com/RmCCgQtiZLDCtblq/arcgis/rest/services/Environmental_Health_Restaurant_and_Market_Inspections_04012023_to_033120026/FeatureServer";
+// LA County republishes its FeatureServers every quarter under new, date-stamped names, and
+// sometimes skips one (there was no inspections service for the 09/30/2026 release). The CSV
+// items keep the same IDs across releases, so they are the primary source; the FeatureServer
+// is a fallback, found by searching the county's ArcGIS org for the newest service by title.
+const ARCGIS_SEARCH_URL: &str = "https://www.arcgis.com/sharing/rest/search";
+const LA_COUNTY_ARCGIS_ORG_ID: &str = "RmCCgQtiZLDCtblq";
+const INVENTORY_SERVICE_TITLE: &str = "Environmental Health Restaurant and Market Inventory";
+const INSPECTIONS_SERVICE_TITLE: &str = "Environmental Health Restaurant and Market Inspections";
 const DEFAULT_INVENTORY_CSV_URL: &str =
     "https://www.arcgis.com/sharing/rest/content/items/4f31c9a99e444a40a3806e3bbe7b5fdd/data";
 const DEFAULT_INSPECTIONS_CSV_URL: &str =
@@ -23,8 +29,10 @@ const DEFAULT_PAGE_SIZE: usize = 2_000;
 #[derive(Clone)]
 pub struct LaCountyConnector {
     client: Client,
-    inventory_url: String,
-    inspections_url: String,
+    /// Explicit FeatureServer URLs from the environment. When unset, the newest service is
+    /// discovered at fetch time.
+    inventory_url: Option<String>,
+    inspections_url: Option<String>,
     inventory_csv_url: String,
     inspections_csv_url: String,
     page_size: usize,
@@ -40,9 +48,11 @@ impl Default for LaCountyConnector {
 impl LaCountyConnector {
     pub fn from_env() -> Self {
         let inventory_url = env::var("CLEANPLATED_LA_INVENTORY_URL")
-            .unwrap_or_else(|_| DEFAULT_INVENTORY_URL.to_owned());
+            .ok()
+            .filter(|value| !value.trim().is_empty());
         let inspections_url = env::var("CLEANPLATED_LA_INSPECTIONS_URL")
-            .unwrap_or_else(|_| DEFAULT_INSPECTIONS_URL.to_owned());
+            .ok()
+            .filter(|value| !value.trim().is_empty());
         let inventory_csv_url = env::var("CLEANPLATED_LA_INVENTORY_CSV_URL")
             .unwrap_or_else(|_| DEFAULT_INVENTORY_CSV_URL.to_owned());
         let inspections_csv_url = env::var("CLEANPLATED_LA_INSPECTIONS_CSV_URL")
@@ -145,39 +155,83 @@ impl LaCountyConnector {
         Ok(rows)
     }
 
-    async fn fetch_inspections(&self) -> Result<Vec<LaInspectionAttrs>> {
-        match self.query_features(
-            &self.inspections_url,
+    /// Returns the configured FeatureServer URL, or the newest one in the county's ArcGIS org
+    /// whose title starts with `title`.
+    async fn feature_service_url(&self, configured: Option<&str>, title: &str) -> Result<String> {
+        if let Some(url) = configured {
+            return Ok(url.to_owned());
+        }
+
+        let query = format!(
+            "title:\"{title}\" orgid:{LA_COUNTY_ARCGIS_ORG_ID} type:\"Feature Service\""
+        );
+        let response = self
+            .client
+            .get(ARCGIS_SEARCH_URL)
+            .query(&[
+                ("q", query.as_str()),
+                ("sortField", "modified"),
+                ("sortOrder", "desc"),
+                ("num", "20"),
+                ("f", "json"),
+            ])
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<ArcGisSearchResponse>()
+            .await?;
+
+        newest_matching_service(response.results, title)
+            .with_context(|| format!("no published FeatureServer titled \"{title}\""))
+    }
+
+    async fn fetch_inspections_feature_service(&self) -> Result<Vec<LaInspectionAttrs>> {
+        let url = self
+            .feature_service_url(self.inspections_url.as_deref(), INSPECTIONS_SERVICE_TITLE)
+            .await?;
+        self.query_features(
+            &url,
             "FACILITY_ID IS NOT NULL",
             "ACTIVITY_DATE,FACILITY_ID,FACILITY_NAME,FACILITY_ADDRESS,FACILITY_CITY,FACILITY_STATE,FACILITY_ZIP,SCORE,GRADE",
             Some("ACTIVITY_DATE DESC"),
         )
         .await
-        .context("LA inspections FeatureServer request failed")
-        {
-            Ok(records) => Ok(records),
-            Err(error) => {
-                warn!(error = %error, "LA inspections FeatureServer failed; falling back to CSV item");
-                self.fetch_inspections_csv().await
+    }
+
+    async fn fetch_inventory_feature_service(&self) -> Result<Vec<LaInventoryAttrs>> {
+        let url = self
+            .feature_service_url(self.inventory_url.as_deref(), INVENTORY_SERVICE_TITLE)
+            .await?;
+        self.query_features(&url, "FACILITY_ID IS NOT NULL", "*", None)
+            .await
+    }
+
+    async fn fetch_inspections(&self) -> Result<Vec<LaInspectionAttrs>> {
+        match self.fetch_inspections_csv().await {
+            Ok(records) => {
+                info!(records = records.len(), "LA inspections loaded from CSV item");
+                Ok(records)
+            }
+            Err(csv_error) => {
+                warn!(error = %csv_error, "LA inspections CSV failed; falling back to FeatureServer");
+                self.fetch_inspections_feature_service()
+                    .await
+                    .context("LA inspections FeatureServer fallback failed")
             }
         }
     }
 
     async fn fetch_inventory(&self) -> Result<HashMap<String, LaInventoryAttrs>> {
-        let rows: Vec<LaInventoryAttrs> = match self
-            .query_features(
-                &self.inventory_url,
-                "FACILITY_ID IS NOT NULL",
-                "FACILITY_ID,FACILITY_NAME,FACILITY_ADDRESS,FACILITY_CITY,FACILITY__STATE,FACILITY_ZIP,FACILITY_LATITUDE,FACILITY_LONGITUDE",
-                None,
-            )
-            .await
-            .context("LA inventory FeatureServer request failed")
-        {
-            Ok(records) => records,
-            Err(error) => {
-                warn!(error = %error, "LA inventory FeatureServer failed; falling back to CSV item");
-                self.fetch_inventory_csv().await?
+        let rows = match self.fetch_inventory_csv().await {
+            Ok(records) => {
+                info!(records = records.len(), "LA inventory loaded from CSV item");
+                records
+            }
+            Err(csv_error) => {
+                warn!(error = %csv_error, "LA inventory CSV failed; falling back to FeatureServer");
+                self.fetch_inventory_feature_service()
+                    .await
+                    .context("LA inventory FeatureServer fallback failed")?
             }
         };
 
@@ -331,6 +385,29 @@ impl HealthDataConnector for LaCountyConnector {
 }
 
 #[derive(Debug, Deserialize)]
+struct ArcGisSearchResponse {
+    results: Vec<ArcGisSearchItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ArcGisSearchItem {
+    title: String,
+    url: Option<String>,
+    modified: i64,
+}
+
+/// ArcGIS search matches titles loosely, so keep only exact prefix matches and take the most
+/// recently modified one.
+fn newest_matching_service(items: Vec<ArcGisSearchItem>, title: &str) -> Option<String> {
+    items
+        .into_iter()
+        .filter(|item| item.title.starts_with(title))
+        .filter_map(|item| item.url.map(|url| (item.modified, url)))
+        .max_by_key(|(modified, _)| *modified)
+        .map(|(_, url)| url)
+}
+
+#[derive(Debug, Deserialize)]
 struct ArcGisResponse<T> {
     #[serde(rename = "exceededTransferLimit")]
     exceeded_transfer_limit: Option<bool>,
@@ -374,13 +451,14 @@ struct LaInventoryAttrs {
     facility_address: Option<String>,
     #[serde(rename = "FACILITY_CITY")]
     facility_city: Option<String>,
-    #[serde(rename = "FACILITY__STATE")]
+    #[serde(rename = "FACILITY__STATE", alias = "FACILITY_STATE")]
     facility_state: Option<String>,
     #[serde(rename = "FACILITY_ZIP")]
     facility_zip: Option<String>,
-    #[serde(rename = "FACILITY_LATITUDE")]
+    // The 09/30/2026 FeatureServer renamed these to LATITUDE and LONGITUDE.
+    #[serde(rename = "FACILITY_LATITUDE", alias = "LATITUDE")]
     facility_latitude: Option<f64>,
-    #[serde(rename = "FACILITY_LONGITUDE")]
+    #[serde(rename = "FACILITY_LONGITUDE", alias = "LONGITUDE")]
     facility_longitude: Option<f64>,
 }
 
@@ -493,5 +571,59 @@ mod tests {
         assert_eq!(row.facility_id.as_deref(), Some("FA1"));
         assert_eq!(row.activity_date, Some(1_775_001_600_000));
         assert_eq!(row.score, Some(97.0));
+    }
+
+    #[test]
+    fn inventory_attrs_accept_old_and_new_coordinate_field_names() {
+        let old: LaInventoryAttrs = serde_json::from_value(serde_json::json!({
+            "FACILITY_ID": "FA1", "FACILITY_LATITUDE": 34.03, "FACILITY_LONGITUDE": -118.33
+        }))
+        .unwrap();
+        let new: LaInventoryAttrs = serde_json::from_value(serde_json::json!({
+            "FACILITY_ID": "FA1", "LATITUDE": 34.03, "LONGITUDE": -118.33
+        }))
+        .unwrap();
+
+        assert_eq!(old.facility_latitude, Some(34.03));
+        assert_eq!(new.facility_latitude, Some(34.03));
+        assert_eq!(new.facility_longitude, Some(-118.33));
+    }
+
+    #[test]
+    fn newest_matching_service_ignores_loose_title_matches() {
+        let item = |title: &str, modified, url: &str| ArcGisSearchItem {
+            title: title.to_owned(),
+            url: Some(url.to_owned()),
+            modified,
+        };
+        let items = vec![
+            item("Environmental Health Restaurant and Market Inventory 04-01-2026", 1, "old"),
+            item("Environmental Health Restaurant and Market Inventory 09-30-2026", 3, "new"),
+            item("Restaurant and Market Inventory copy", 9, "unrelated"),
+        ];
+
+        assert_eq!(
+            newest_matching_service(items, INVENTORY_SERVICE_TITLE).as_deref(),
+            Some("new")
+        );
+    }
+
+    /// Hits the live county ArcGIS org. Run with `cargo test -- --ignored la_live`.
+    #[tokio::test]
+    #[ignore]
+    async fn la_live_inventory_feature_service_is_discoverable_and_has_coordinates() {
+        let connector = LaCountyConnector::from_env();
+        let rows = connector.fetch_inventory_feature_service().await.unwrap();
+        assert!(rows.len() > 10_000, "only {} rows", rows.len());
+        assert!(rows.iter().filter(|row| row.facility_latitude.is_some()).count() > 10_000);
+    }
+
+    /// Run with `cargo test -- --ignored la_live`.
+    #[tokio::test]
+    #[ignore]
+    async fn la_live_csv_items_load() {
+        let connector = LaCountyConnector::from_env();
+        assert!(connector.fetch_inspections_csv().await.unwrap().len() > 10_000);
+        assert!(connector.fetch_inventory_csv().await.unwrap().len() > 10_000);
     }
 }

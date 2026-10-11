@@ -60,17 +60,15 @@ The implementation references:
 
 ### Los Angeles County (ArcGIS)
 
-`LaCountyConnector` calls live ArcGIS FeatureServer feeds for:
-
-- Facility inventory
-- Inspections
-- Violations
+`LaCountyConnector` loads facility inventory and inspections from the county's published CSV
+items, whose IDs stay the same across quarterly releases. If a CSV download fails it falls back
+to the ArcGIS FeatureServer, finding the newest service by title in the county's ArcGIS org,
+because the county republishes those under new date-stamped names every quarter.
 
 Config:
 
-- `CLEANPLATED_LA_INVENTORY_URL`
-- `CLEANPLATED_LA_INSPECTIONS_URL`
-- `CLEANPLATED_LA_VIOLATIONS_URL`
+- `CLEANPLATED_LA_INVENTORY_CSV_URL`, `CLEANPLATED_LA_INSPECTIONS_CSV_URL` (override the CSV items)
+- `CLEANPLATED_LA_INVENTORY_URL`, `CLEANPLATED_LA_INSPECTIONS_URL` (pin a FeatureServer instead of discovering it)
 - `CLEANPLATED_LA_LIMIT`
 - `CLEANPLATED_LA_PAGE_SIZE`
 - `CLEANPLATED_LA_MAX_RECORDS` (optional cap)
